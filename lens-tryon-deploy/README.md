@@ -8,27 +8,40 @@ Everything runs locally. The MediaPipe runtime and the face model are bundled, s
 
 ## Run
 
-- **Windows:** double-click `start.bat`
-- **macOS / Linux:** `./start.sh` (or `python3 server.py`)
+The app is a static folder. Serve it with any web server and open it in a browser:
 
-Your browser opens at `http://localhost:8765`. Click **Start camera** or **Upload photo**.
+```
+cd lens-tryon-deploy
+python3 -m http.server 8765
+```
+
+Then open `http://localhost:8765` and click **Start camera** or **Upload photo** (you can also drop a photo onto the preview).
 
 Don't open `index.html` by double-clicking it. Browsers won't load the bundled model or the camera from a `file://` page.
 No Python? Run `npx serve -l 8765` in this folder and open `http://localhost:8765`.
 
+To try it on a phone, deploy the folder to an HTTPS host (see Deploying). The camera doesn't work over plain `http://` on another device.
+
 ## Folder layout
 
+All files sit side by side in this folder:
+
 ```
-index.html                 app (UI, tracking, lens rendering)
-server.py                  local server (correct .mjs/.wasm MIME types, free port, opens browser)
-start.bat / start.sh       launchers
-vendor/vision_bundle.mjs   @mediapipe/tasks-vision 0.10.14 (Apache-2.0)
-vendor/wasm/               MediaPipe WASM runtime (SIMD + non-SIMD)
-models/face_landmarker.task  MediaPipe Face Landmarker model (478 landmarks incl. iris)
+index.html                         app (UI, tracking, lens rendering)
+vision_bundle.mjs                  @mediapipe/tasks-vision 0.10.14 (Apache-2.0)
+vision_wasm_internal.js / .wasm    MediaPipe WASM runtime (SIMD)
+vision_wasm_nosimd_internal.js / .wasm   MediaPipe WASM runtime (no SIMD)
+face_landmarker.task               MediaPipe Face Landmarker model (478 landmarks incl. iris)
 ```
 
 If a bundled file is missing, the app falls back to jsDelivr, unpkg and Google's model host.
 If all of those fail, the error appears under the video, and a **Load model file** button lets you pick a `.task` file by hand.
+
+## Performance
+
+Face tracking runs on the GPU when the browser has a real one. On machines where WebGL is software-rendered
+(VMs, remote desktops, blocked drivers) the app switches to the CPU path, which is several times faster there.
+Add `?delegate=GPU` or `?delegate=CPU` to the URL to force one.
 
 ## Custom lenses
 
@@ -38,7 +51,7 @@ White backgrounds and a white pupil area are removed automatically. Turn off
 
 ## Recording issues
 
-With the camera on, type what you're testing in the **issue note** box (for example, "lens shakes when I tilt my head").
+Open **Report a tracking issue** at the bottom of the side panel. With the camera on, type what you're testing in the note box (for example, "lens shakes when I tilt my head").
 Then click **Record** and reproduce the problem. Press **M** (or click **⚑ Mark moment**) each time the issue appears, then click **Stop**.
 Recording stops on its own after 60 seconds. The note shows on the video, goes in the log and in the file name. Each mark flashes on the video and is logged with its time.
 Two files land in your Downloads folder:
