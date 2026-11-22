@@ -509,7 +509,7 @@ function applyLens(g, W, H){
   const chroma=(r,g2,b)=>{ const s=r+g2+b+3; return [r/s,g2/s,b/s]; };
   const curRGB = iN>4 ? [iR/iN,iG/iN,iB/iN] : null, curC = curRGB ? chroma(...curRGB) : null;
   const contrastOK = !!(sk && iN>4 && (skL-irisL) > .05);         // an iris is darker than the skin around it
-  let model=irisModel[g.slot], matchOK=true;
+  let model=g.useFilter?irisModel[g.slot]:null, matchOK=true;   // photos never reuse the camera face's iris
   if(model && curC){
     const cd=Math.abs(curC[0]-model.c[0])+Math.abs(curC[1]-model.c[1])+Math.abs(curC[2]-model.c[2]);
     const lr=irisL/model.L;
@@ -795,7 +795,7 @@ async function startCamera(){
   if(stream){ stopCamera(); return; }
   if(!await openStream()) return;
   await setMode("VIDEO");
-  still=null; stillLm=null;
+  still=null; stillLm=null; irisModel[0]=irisModel[1]=null;                 // a new session may be a different person
   $("empty").style.display="none"; $("snapBtn").disabled=false; $("recBtn").disabled=false; fpsEl.style.display="";
   $("camBtn").textContent="Stop camera"; setStatus("Model ready","ok"); updateSplitUI();
   try{ const n=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput").length;
