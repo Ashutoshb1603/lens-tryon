@@ -372,7 +372,7 @@ const PUPIL_PRIOR=.4;                                            // typical indo
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
 const resetFilters=()=>{ filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
   pupilRaw[0]=pupilRaw[1]=null; ratioRaw[0]=ratioRaw[1]=null; pupilMem[0]=pupilMem[1]=null; pupilShown[0]=pupilShown[1]=null; offMem[0]=offMem[1]=null; statMem[0]={}; statMem[1]={};
-  eyeVis[0]=eyeVis[1]=1; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; };          // irisModel survives brief tracking loss
+  eyeVis[0]=eyeVis[1]=1; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; sigmaMem[0]=sigmaMem[1]=null; };          // irisModel survives brief tracking loss
 
 /* ---------------- Eye geometry ---------------- */
 function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
@@ -443,8 +443,9 @@ function sampleTex(u,v,mip){ // bilinear on one mip level, u,v in [0,1]
   return texel;
 }
 // scratch buffers, grown on demand and reused every frame
-let scratchN=0, sL0, sLb, sGate, sTmp;
-function scratch(n){ if(n>scratchN){ scratchN=Math.ceil(n*1.5); sL0=new Float32Array(scratchN); sLb=new Float32Array(scratchN); sGate=new Float32Array(scratchN); sTmp=new Float32Array(scratchN); } }
+let scratchN=0, sL0, sLb, sGate, sTmp, sD0, sD1, sD2, sW, sC;
+function scratch(n){ if(n>scratchN){ scratchN=Math.ceil(n*1.5); sL0=new Float32Array(scratchN); sLb=new Float32Array(scratchN); sGate=new Float32Array(scratchN); sTmp=new Float32Array(scratchN);
+    sD0=new Float32Array(scratchN); sD1=new Float32Array(scratchN); sD2=new Float32Array(scratchN); sW=new Float32Array(scratchN); sC=new Float32Array(scratchN); } }
 function boxBlur(src, tmp, w, h, r){                             // separable box blur, in place (edges clamp)
   const k=1/(2*r+1);
   for(let y=0;y<h;y++){ const row=y*w; let acc=0;
@@ -454,6 +455,29 @@ function boxBlur(src, tmp, w, h, r){                             // separable bo
     for(let y=-r;y<=r;y++) acc+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
     for(let y=0;y<h;y++){ src[y*w+x]=acc*k; acc+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.max(0,y-r)*w+x]; } }
 }
+// How soft is the camera image here? Width (px) of the sharpest edge in the crop, as a gaussian sigma.
+// A lens drawn pixel-sharp onto a soft, noisy webcam frame is what makes it look pasted on.
+function sceneSigma(Lb, w, h, reach){
+  let best=0, bi=-1, bgx=0, bgy=0;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){ const i=y*w+x, gx=Lb[i+1]-Lb[i-1], gy=Lb[i+w]-Lb[i-w], m=gx*gx+gy*gy; if(m>best){ best=m; bi=i; bgx=gx; bgy=gy; } }
+  if(bi<0 || best<1e-4) return null;
+  const gm=Math.sqrt(best), nx=bgx/gm, ny=bgy/gm, bx=bi%w, by=(bi/w)|0;
+  const at=t=>{ const x=Math.min(w-1,Math.max(0,Math.round(bx+nx*t))), y=Math.min(h-1,Math.max(0,Math.round(by+ny*t))); return Lb[y*w+x]; };
+  let hi=Lb[bi], lo=Lb[bi];
+  for(let t=1;t<=reach;t++){ const v=at(t); if(v<hi+.004) break; hi=v; }       // walk up and down the edge until it flattens
+  for(let t=1;t<=reach;t++){ const v=at(-t); if(v>lo-.004) break; lo=v; }
+  const width=(hi-lo)/(gm*.5);                                                  // edge height / slope
+  return Math.sqrt(Math.max(0,(width/2.5)**2-1.1));                             // minus what the 3x3 denoise and the pixel grid add
+}
+function softenInto(src, w, h, sigma){                           // gaussian-ish blur of a small float map, any sigma (px)
+  if(sigma<.25) return;
+  let r=1; while(Math.sqrt(2*r*(r+1)/3)<sigma && r<12) r++;
+  const mix=Math.min(1,(sigma/Math.sqrt(2*r*(r+1)/3))**2), n=w*h;
+  for(let i=0;i<n;i++) sW[i]=src[i];
+  boxBlur(sW,sTmp,w,h,r); boxBlur(sW,sTmp,w,h,r);
+  for(let i=0;i<n;i++) src[i]+=(sW[i]-src[i])*mix;
+}
+const sigmaMem=[null,null];
 function applyLens(g, W, H){
   const openFade=smooth(.08,.16,g.open);                        // fade out while blinking / heavy squint
   if(openFade<=0.01 || g.rx < 2.5) return;
@@ -481,13 +505,15 @@ function applyLens(g, W, H){
   boxBlur(Lb,sTmp,w,h,1);
 
   // pass 1: iris brightness, eyelid-skin colour, and a histogram of the inner iris (for the pupil)
-  let iS=0,iN=0,iR=0,iG=0,iB=0, inner=[], hist=new Uint32Array(64), skin=[], ring=[], ringHist=new Uint32Array(64);
+  let iS=0,iN=0,iR=0,iG=0,iB=0, inner=[], hist=new Uint32Array(64), skin=[], ring=[], ringHist=new Uint32Array(64), sclHist=new Uint32Array(64);
+  let sclN=0;
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=y*w+x, m=mask[i*4+3]/255, o=i*4;
     if(m<.03){ skin.push(o); continue; }
     if(m<.85) continue;
     const dx=x+x0+.5-g.cx, dy=y+y0+.5-g.cy;
     const rn=Math.hypot((dx*ux+dy*uy)/g.rx, (-dx*uy+dy*ux)/g.ry), L=lum(o);
+    if(rn>1.2 && rn<2.4){ sclHist[Math.min(63,L*64|0)]++; sclN++; }
     if(rn>.5 && rn<.9 && L<.75){ ring.push(o); ringHist[Math.min(63,L*64|0)]++; }
     if(rn<.6 && m>.97){ inner.push(i); hist[Math.min(63,L*64|0)]++; }
   }
@@ -500,6 +526,9 @@ function applyLens(g, W, H){
     for(const o of ring){ const L=lum(o); if(L>hiT || L<loT) continue; iS+=L; iN++; iR+=d[o]; iG+=d[o+1]; iB+=d[o+2]; }
   }
   let irisL = iN>4 ? Math.max(.04,iS/iN) : .3;
+  // reference white: the sclera next to the iris (falls back to eyelid skin). It tells how much light reaches the eye.
+  let white=null;
+  if(sclN>=6){ let acc=0; for(let b=63;b>=0;b--){ acc+=sclHist[b]; if(acc>=sclN*.3){ white=(b+.5)/64; break; } } }
   let sk=null, skL=0;
   { let r=0,gg=0,b=0,n=0; for(const o of skin){ if(lum(o)>irisL+.06){ r+=d[o];gg+=d[o+1];b+=d[o+2];n++; } }
     if(n>8){ sk=[r/n,gg/n,b/n]; skL=(.299*sk[0]+.587*sk[1]+.114*sk[2])/255; } }
@@ -594,6 +623,7 @@ function applyLens(g, W, H){
       else m[key]=Array.isArray(v)? m[key].map((q,j)=>q+(v[j]-q)*k) : m[key]+(v-m[key])*k; return m[key]; };
     irisL=ema('irisL',irisL); const skS=ema('sk',sk); if(skS){ sk=skS; skL=(.299*sk[0]+.587*sk[1]+.114*sk[2])/255; }
     if(seen) ema('pRGB',pupilRGB); if(m.pRGB) pupilRGB=m.pRGB;
+    white=ema('white',white);
   }
   if(!g.useFilter){                                                 // photos: share one pupil size across both eyes too
     if(pupilEst!==null) pupilRaw[g.slot]=pupilEst;
@@ -633,7 +663,19 @@ function applyLens(g, W, H){
   const br=Math.max(1,Math.round(rx*.07));
   boxBlur(gateMap,sTmp,w,h,br); boxBlur(gateMap,sTmp,w,h,br);     // two box passes ≈ gaussian
 
-  // pass 2b: composite
+  // Match the lens to the camera image, not to the texture file:
+  //  - exposure: a lens can't be brighter than the light falling on the eye allows (dim rooms, backlight)
+  //  - softness: blur the lens as much as the frame itself is blurred (focus, motion, low resolution)
+  //  - grain:    keep the sensor noise on top of the lens, like on every other pixel
+  if(white==null && sk) white=Math.min(1,skL*1.2);
+  const expo = white==null ? 1 : Math.min(1.08,Math.max(.68,white/.6));
+  let sigma=sceneSigma(Lb,w,h,Math.ceil(g.rx)+3);
+  if(g.useFilter){ const sl=g.slot; if(sigma!==null) sigmaMem[sl]=sigmaMem[sl]===null?sigma:sigmaMem[sl]+(sigma-sigmaMem[sl])*.25; sigma=sigmaMem[sl]; }
+  sigma=Math.min(g.rx*.45,sigma||0);
+  g.sigma=sigma; g.expo=expo;
+  const D0=sD0, D1=sD1, D2=sD2, n=w*h; D0.fill(0,0,n); D1.fill(0,0,n); D2.fill(0,0,n); sC.fill(0,0,n);
+  const cover=sC;
+  // pass 2b: lens colour as a difference from the camera pixel
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=y*w+x, lid=mask[i*4+3]/255; if(lid<=0.004) continue;
     const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
@@ -645,13 +687,19 @@ function applyLens(g, W, H){
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
     const pin=smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
     let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.86,.99,rn))*pin;   // fade before the limbus (no glow on the sclera)
-    let sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=1+(sh-1)*S.texture;  // natural shading; capped so sclera/skin can't brighten it
+    let sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=(1+(sh-1)*S.texture)*expo;  // natural shading; capped so sclera/skin can't brighten it
     let nr=R+(s[0]*sh-R)*alpha, ng=G+(s[1]*sh-G)*alpha, nb=B+(s[2]*sh-B)*alpha;
     // fill the pupil with real pupil darkness so a small misalignment never shows a ring of the old iris
     const pa=(1-smooth(pupil-.1,pupil,rn))*vis*.35;              // only a light darkening right at the pupil
     if(pa>0){ nr+=(Math.min(nr,pupilRGB[0])-nr)*pa; ng+=(Math.min(ng,pupilRGB[1])-ng)*pa; nb+=(Math.min(nb,pupilRGB[2])-nb)*pa; }
-    const hl=smooth(hlT,hlT+.16,L);                              // preserve specular catchlights
-    d[o]=nr+(R-nr)*hl; d[o+1]=ng+(G-ng)*hl; d[o+2]=nb+(B-nb)*hl;
+    const keep=1-smooth(hlT,hlT+.16,L);                          // preserve specular catchlights
+    D0[i]=(nr-R)*keep; D1[i]=(ng-G)*keep; D2[i]=(nb-B)*keep; cover[i]=alpha*keep;
+  }
+  softenInto(D0,w,h,sigma); softenInto(D1,w,h,sigma); softenInto(D2,w,h,sigma); softenInto(cover,w,h,sigma);
+  for(let i=0;i<n;i++){
+    if(D0[i]===0 && D1[i]===0 && D2[i]===0) continue;
+    const o=i*4, grain=(L0[i]-Lb[i])*255*cover[i];              // the part of the original noise the lens covered up
+    d[o]+=D0[i]+grain; d[o+1]+=D1[i]+grain; d[o+2]+=D2[i]+grain;
   }
   ctx.putImageData(img,x0,y0);
 }
@@ -687,7 +735,7 @@ function processFrame(source, W, H, lmList, t, useFilter){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,sigma:g.sigma,expo:g.expo,dbg:g.dbg}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
