@@ -443,9 +443,9 @@ function sampleTex(u,v,mip){ // bilinear on one mip level, u,v in [0,1]
   return texel;
 }
 // scratch buffers, grown on demand and reused every frame
-let scratchN=0, sL0, sLb, sGate, sTmp, sD0, sD1, sD2, sW, sC;
+let scratchN=0, sL0, sLb, sGate, sTmp, sD0, sD1, sD2, sW;
 function scratch(n){ if(n>scratchN){ scratchN=Math.ceil(n*1.5); sL0=new Float32Array(scratchN); sLb=new Float32Array(scratchN); sGate=new Float32Array(scratchN); sTmp=new Float32Array(scratchN);
-    sD0=new Float32Array(scratchN); sD1=new Float32Array(scratchN); sD2=new Float32Array(scratchN); sW=new Float32Array(scratchN); sC=new Float32Array(scratchN); } }
+    sD0=new Float32Array(scratchN); sD1=new Float32Array(scratchN); sD2=new Float32Array(scratchN); sW=new Float32Array(scratchN); } }
 function boxBlur(src, tmp, w, h, r){                             // separable box blur, in place (edges clamp)
   const k=1/(2*r+1);
   for(let y=0;y<h;y++){ const row=y*w; let acc=0;
@@ -677,15 +677,15 @@ function applyLens(g, W, H){
   if(g.useFilter){ const sl=g.slot; if(sigma!==null) sigmaMem[sl]=sigmaMem[sl]===null?sigma:sigmaMem[sl]+(sigma-sigmaMem[sl])*.25; sigma=sigmaMem[sl]; }
   sigma=Math.min(g.rx*.45,sigma||0);
   g.sigma=sigma; g.expo=expo;
-  const D0=sD0, D1=sD1, D2=sD2, n=w*h; D0.fill(0,0,n); D1.fill(0,0,n); D2.fill(0,0,n); sC.fill(0,0,n);
-  const cover=sC;
+  const D0=sD0, D1=sD1, D2=sD2, n=w*h; D0.fill(0,0,n); D1.fill(0,0,n); D2.fill(0,0,n);
   // pass 2b: lens colour as a difference from the camera pixel
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=y*w+x, lid=mask[i*4+3]/255; if(lid<=0.004) continue;
     const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
     const a=(dx*ux+dy*uy)/rx, b=(-dx*uy+dy*ux)/ry, rn=Math.hypot(a,b);
     if(rn>=1) continue;
-    const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=L0[i];
+    const o=i*4, L=L0[i], nz=(L-Lb[i])*255;
+    const R=d[o]-nz, G=d[o+1]-nz, B=d[o+2]-nz;                  // lens is computed against the denoised pixel, so the grain stays in the frame untouched
     const vis=lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
@@ -697,13 +697,12 @@ function applyLens(g, W, H){
     const pa=(1-smooth(pupil-.1,pupil,rn))*vis*.35;              // only a light darkening right at the pupil
     if(pa>0){ nr+=(Math.min(nr,pupilRGB[0])-nr)*pa; ng+=(Math.min(ng,pupilRGB[1])-ng)*pa; nb+=(Math.min(nb,pupilRGB[2])-nb)*pa; }
     const keep=1-smooth(hlT,hlT+.16,L);                          // preserve specular catchlights
-    D0[i]=(nr-R)*keep; D1[i]=(ng-G)*keep; D2[i]=(nb-B)*keep; cover[i]=alpha*keep;
+    D0[i]=(nr-R)*keep; D1[i]=(ng-G)*keep; D2[i]=(nb-B)*keep;
   }
-  softenInto(D0,w,h,sigma); softenInto(D1,w,h,sigma); softenInto(D2,w,h,sigma); softenInto(cover,w,h,sigma);
+  softenInto(D0,w,h,sigma); softenInto(D1,w,h,sigma); softenInto(D2,w,h,sigma);
   for(let i=0;i<n;i++){
     if(D0[i]===0 && D1[i]===0 && D2[i]===0) continue;
-    const o=i*4, grain=(L0[i]-Lb[i])*255*cover[i];              // the part of the original noise the lens covered up
-    d[o]+=D0[i]+grain; d[o+1]+=D1[i]+grain; d[o+2]+=D2[i]+grain;
+    const o=i*4; d[o]+=D0[i]; d[o+1]+=D1[i]; d[o+2]+=D2[i];
   }
   ctx.putImageData(img,x0,y0);
 }
