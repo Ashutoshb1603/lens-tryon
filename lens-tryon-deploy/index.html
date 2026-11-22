@@ -495,7 +495,7 @@ function applyLens(g, W, H){
   // would otherwise drag the reference off, and the "looks like this iris" test below then rejects real iris.
   if(ring.length>4){
     let acc=0, med=.3, q1=0; const half=ring.length*.5, quarter=ring.length*.2;
-    for(let b=0, gotQ=false;b<64;b++){ acc+=ringHist[b]; if(!gotQ && acc>=quarter){ q1=(b+.5)/64; gotQ=true; } if(acc>=half){ med=(b+.5)/64; break; } }
+    for(let b=0, gotQ=false;b<64;b++){ acc+=ringHist[b]; if(!gotQ && acc>=quarter){ q1=b/64; gotQ=true; } if(acc>=half){ med=(b+.5)/64; break; } }
     const hiT=med*1.5+.04, loT=q1*.5;
     for(const o of ring){ const L=lum(o); if(L>hiT || L<loT) continue; iS+=L; iN++; iR+=d[o]; iG+=d[o+1]; iB+=d[o+2]; }
   }
