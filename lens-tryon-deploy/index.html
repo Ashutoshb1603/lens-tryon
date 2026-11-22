@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
 <title>Lens Try-On — Live Contact Lens Preview</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232c5fd0'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%230b0d12'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -26,7 +27,6 @@
   .pill.ok{color:var(--accent2)} .pill.err{color:#ff7b7b}
   main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;padding:18px 22px;
     height:calc(100% - 59px)}
-  @media (max-width:900px){main{grid-template-columns:1fr;height:auto}}
   .stage{display:flex;flex-direction:column;gap:12px;min-height:0}
   .viewport{position:relative;flex:1;min-height:360px;background:#07080b;border:1px solid var(--line);
     border-radius:var(--radius);overflow:hidden;display:flex;align-items:center;justify-content:center}
@@ -85,6 +85,39 @@
   .upload:hover{border-color:var(--accent);color:var(--text)}
   input[type=file]{display:none}
   .foot{color:var(--muted);font-size:11.5px;line-height:1.5}
+  .viewport.drop{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,156,255,.25) inset}
+  .split{touch-action:none}
+  .split::before{content:"";position:absolute;top:0;bottom:0;left:-18px;width:36px}   /* finger-sized grab area */
+  details.report summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;
+    font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600}
+  details.report summary::-webkit-details-marker{display:none}
+  details.report summary::after{content:"+";font-size:16px;font-weight:400}
+  details.report[open] summary::after{content:"–"}
+  details.report .recbar{margin-top:12px}
+  details.report .recbar input[type=text]{min-width:0;flex:1 1 100%}
+  details.report .marks{white-space:normal}
+  /* phones and narrow windows: the video stays pinned to the top while lenses and sliders scroll under it */
+  @media (max-width:900px){
+    html,body{height:auto}
+    header{padding:10px 14px;padding-top:max(10px,env(safe-area-inset-top))}
+    main{display:block;height:auto;padding:0 12px calc(16px + env(safe-area-inset-bottom))}
+    .stage{display:contents}
+    .viewport{position:sticky;top:0;z-index:5;flex:none;min-height:0;width:100%;
+      aspect-ratio:var(--ar,4/3);max-height:56svh;border-radius:0 0 var(--radius) var(--radius);border-top:0}
+    .stagebar{margin:10px 0 12px}
+    .stagebar .hint{flex:1 1 100%}
+    button,.btn{padding:11px 14px}
+    aside{overflow:visible;padding:14px;gap:16px}
+    .swatches{display:flex;overflow-x:auto;gap:6px;margin:0 -14px;padding:2px 14px 8px;scroll-snap-type:x proximity;
+      -webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .swatches::-webkit-scrollbar{display:none}
+    .sw{flex:0 0 68px;scroll-snap-align:start}
+    .ctl{margin-bottom:16px}
+    input[type=range]{height:28px}
+    .toggle{padding:9px 0}
+    .toggle input{width:44px;height:24px}
+  }
+  @media (max-width:900px) and (orientation:landscape){ .viewport{max-height:78svh} }
 </style>
 </head>
 <body>
@@ -102,7 +135,7 @@
       <div class="tag r" id="tagR">AFTER</div>
       <div class="empty" id="empty">
         <h2>Try on coloured contact lenses</h2>
-        <p>Start your camera for a live preview, or upload a clear front-facing photo. Good, even lighting gives the best result.</p>
+        <p>Start your camera for a live preview, or upload (or drop in) a clear front-facing photo. Good, even lighting gives the best result.</p>
         <div class="row" style="justify-content:center">
           <button class="primary" id="camBtn2" disabled>Start camera</button>
           <label class="btn" for="photoIn">Upload photo</label>
@@ -114,15 +147,10 @@
         <button class="primary" id="camBtn" disabled>Start camera</button>
         <label class="btn" for="photoIn">Upload photo</label>
         <button id="snapBtn" disabled>Save snapshot</button>
-        <button id="recBtn" class="rec" disabled title="Records camera + result side by side, with a tracking log, for bug reports"><span class="dot"></span><span id="recLbl">Record</span></button>
+        <button id="flipBtn" style="display:none" title="Switch between front and back camera">Flip camera</button>
         <label class="btn" for="modelIn" id="modelPick" style="display:none">Load model file (.task)</label>
       </div>
       <div class="hint" id="hint">Tip: look at the camera and keep your eyes open.</div>
-    </div>
-    <div class="recbar">
-      <input type="text" id="recNote" maxlength="300" placeholder="Issue note for the recording, e.g. “lens shakes when I tilt my head” (saved in the video + log)">
-      <button id="markBtn" class="mark" style="display:none" title="Flag the moment the issue happens (shortcut: M)">⚑ Mark moment</button>
-      <span class="marks" id="markInfo">Tip: while recording, press <b>M</b> when the issue appears</span>
     </div>
   </section>
 
@@ -130,7 +158,7 @@
     <div>
       <h3>Lenses</h3>
       <div class="swatches" id="swatches"></div>
-      <label class="upload" for="lensIn">＋ Upload your own lens image (PNG/JPG of a product lens)</label>
+      <label class="upload" for="lensIn">+ Upload your own lens image (PNG/JPG of a product lens)</label>
     </div>
 
     <div>
@@ -149,6 +177,16 @@
       <div class="toggle">Show tracking overlay <input type="checkbox" id="debug"></div>
       <div class="toggle">Remove white background on uploaded lens <input type="checkbox" id="keyWhite" checked></div>
     </div>
+
+    <details class="report" id="report">
+      <summary>Report a tracking issue</summary>
+      <div class="recbar">
+        <input type="text" id="recNote" maxlength="300" placeholder="What goes wrong? e.g. “lens shakes when I tilt my head”">
+        <button id="recBtn" class="rec" disabled title="Records camera + result side by side, with a tracking log, for bug reports"><span class="dot"></span><span id="recLbl">Record</span></button>
+        <button id="markBtn" class="mark" style="display:none" title="Flag the moment the issue happens (shortcut: M)">⚑ Mark moment</button>
+        <span class="marks" id="markInfo">Start the camera, then record. Press <b>M</b> when the issue appears.</span>
+      </div>
+    </details>
 
     <div class="foot">
       Runs fully in your browser. MediaPipe Face Landmarker gives the iris and eyelid landmarks. The lens is fitted to the iris ellipse, hidden under the eyelids, and blended so your natural shading and catchlights show through. No images leave your device.
@@ -177,7 +215,7 @@ for (const src of [
 /* ---------------- DOM ---------------- */
 const $ = id => document.getElementById(id);
 const out = $("out"), ctx = out.getContext("2d", { willReadFrequently: true });
-const video = $("video");
+const video = $("video"), vp = $("viewport");
 const statusEl = $("status"), fpsEl = $("fps");
 const setStatus = (t, cls = "") => { statusEl.textContent = t; statusEl.className = "pill " + cls; };
 
@@ -367,7 +405,7 @@ function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
   });
   const top=P(eyeIdx[4]), bot=P(eyeIdx[12]);
   let open=Math.hypot(top[0]-bot[0],top[1]-bot[1]) / ul;          // ~0.3 open, <0.1 closed
-  let g={cx:c[0],cy:c[1],rx,ry,ux,uy,poly,slot,t,useFilter};
+  let g={cx:c[0],cy:c[1],rawx:c[0],rawy:c[1],rx,ry,ux,uy,poly,slot,t,useFilter};
   if(useFilter){ const f=filt[slot];
     // where the iris sits inside the eye, in eye-width units along the eye axes (u = corner→corner, v = down)
     const mx0=(k0[0]+k1[0])/2, my0=(k0[1]+k1[1])/2;
@@ -395,12 +433,26 @@ function drawSmoothPoly(c, pts, ox, oy){
   for(let i=0;i<n;i++){ const p=pts[i], q=mid(p,pts[(i+1)%n]); c.quadraticCurveTo(p[0]-ox,p[1]-oy,q[0],q[1]); }
   c.closePath();
 }
+const texel=new Float32Array(4);                                 // sampleTex writes here: no per-pixel garbage
 function sampleTex(u,v,mip){ // bilinear on one mip level, u,v in [0,1]
   const N=mip.n; u*=N-1; v*=N-1;
   const x0=Math.floor(u), y0=Math.floor(v), fx=u-x0, fy=v-y0, x1=Math.min(x0+1,N-1), y1=Math.min(y0+1,N-1);
-  const i00=(y0*N+x0)*4,i10=(y0*N+x1)*4,i01=(y1*N+x0)*4,i11=(y1*N+x1)*4, t=mip.d, r=[0,0,0,0];
-  for(let k=0;k<4;k++){ r[k]=(t[i00+k]*(1-fx)+t[i10+k]*fx)*(1-fy)+(t[i01+k]*(1-fx)+t[i11+k]*fx)*fy; }
-  return r;
+  const i00=(y0*N+x0)*4,i10=(y0*N+x1)*4,i01=(y1*N+x0)*4,i11=(y1*N+x1)*4, t=mip.d;
+  const w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
+  for(let k=0;k<4;k++) texel[k]=t[i00+k]*w00+t[i10+k]*w10+t[i01+k]*w01+t[i11+k]*w11;
+  return texel;
+}
+// scratch buffers, grown on demand and reused every frame
+let scratchN=0, sL0, sLb, sGate, sTmp;
+function scratch(n){ if(n>scratchN){ scratchN=Math.ceil(n*1.5); sL0=new Float32Array(scratchN); sLb=new Float32Array(scratchN); sGate=new Float32Array(scratchN); sTmp=new Float32Array(scratchN); } }
+function boxBlur(src, tmp, w, h, r){                             // separable box blur, in place (edges clamp)
+  const k=1/(2*r+1);
+  for(let y=0;y<h;y++){ const row=y*w; let acc=0;
+    for(let x=-r;x<=r;x++) acc+=src[row+Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){ tmp[row+x]=acc*k; acc+=src[row+Math.min(w-1,x+r+1)]-src[row+Math.max(0,x-r)]; } }
+  for(let x=0;x<w;x++){ let acc=0;
+    for(let y=-r;y<=r;y++) acc+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
+    for(let y=0;y<h;y++){ src[y*w+x]=acc*k; acc+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.max(0,y-r)*w+x]; } }
 }
 function applyLens(g, W, H){
   const openFade=smooth(.08,.16,g.open);                        // fade out while blinking / heavy squint
@@ -424,22 +476,28 @@ function applyLens(g, W, H){
   const lum=o=>(.299*d[o]+.587*d[o+1]+.114*d[o+2])/255;
   const ux=g.ux, uy=g.uy;
   // denoised luminance (3x3 box) — camera noise must not shimmer through the lens shading
-  const L0=new Float32Array(w*h), Lb=new Float32Array(w*h);
-  for(let i=0;i<w*h;i++) L0[i]=lum(i*4);
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){ let sum=0,n=0;
-    for(let yy=Math.max(0,y-1);yy<=Math.min(h-1,y+1);yy++)for(let xx=Math.max(0,x-1);xx<=Math.min(w-1,x+1);xx++){ sum+=L0[yy*w+xx]; n++; }
-    Lb[y*w+x]=sum/n; }
+  scratch(w*h); const L0=sL0, Lb=sLb;
+  for(let i=0;i<w*h;i++){ L0[i]=lum(i*4); Lb[i]=L0[i]; }
+  boxBlur(Lb,sTmp,w,h,1);
 
   // pass 1: iris brightness, eyelid-skin colour, and a histogram of the inner iris (for the pupil)
-  let iS=0,iN=0,iR=0,iG=0,iB=0, inner=[], hist=new Uint32Array(64), skin=[];
+  let iS=0,iN=0,iR=0,iG=0,iB=0, inner=[], hist=new Uint32Array(64), skin=[], ring=[], ringHist=new Uint32Array(64);
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=y*w+x, m=mask[i*4+3]/255, o=i*4;
     if(m<.03){ skin.push(o); continue; }
     if(m<.85) continue;
     const dx=x+x0+.5-g.cx, dy=y+y0+.5-g.cy;
     const rn=Math.hypot((dx*ux+dy*uy)/g.rx, (-dx*uy+dy*ux)/g.ry), L=lum(o);
-    if(rn>.5 && rn<.9 && L<.75){ iS+=L; iN++; iR+=d[o]; iG+=d[o+1]; iB+=d[o+2]; }
+    if(rn>.5 && rn<.9 && L<.75){ ring.push(o); ringHist[Math.min(63,L*64|0)]++; }
     if(rn<.6 && m>.97){ inner.push(i); hist[Math.min(63,L*64|0)]++; }
+  }
+  // The iris colour comes from the ring's typical pixels only: window/softbox reflections and stray lashes
+  // would otherwise drag the reference off, and the "looks like this iris" test below then rejects real iris.
+  if(ring.length>4){
+    let acc=0, med=.3, q1=0; const half=ring.length*.5, quarter=ring.length*.2;
+    for(let b=0, gotQ=false;b<64;b++){ acc+=ringHist[b]; if(!gotQ && acc>=quarter){ q1=(b+.5)/64; gotQ=true; } if(acc>=half){ med=(b+.5)/64; break; } }
+    const hiT=med*1.5+.04, loT=q1*.5;
+    for(const o of ring){ const L=lum(o); if(L>hiT || L<loT) continue; iS+=L; iN++; iR+=d[o]; iG+=d[o+1]; iB+=d[o+2]; }
   }
   let irisL = iN>4 ? Math.max(.04,iS/iN) : .3;
   let sk=null, skL=0;
@@ -548,27 +606,41 @@ function applyLens(g, W, H){
   let mip=lensMips[0]; for(const m of lensMips){ if(m.n>=2*rx) mip=m; }   // ~1 texel per screen pixel
   const skinGate = sk && (skL-irisL)>.1;
 
-  // pass 2: composite
+  // pass 2a: matte. Per-pixel tests ("is this iris, not skin / a finger / sclera?") are noisy on their own and
+  // punch speckles and jagged holes into the lens, so they go into a map that is blurred before use.
+  const gateMap=sGate, mc0=model.c[0], mc1=model.c[1], mc2=model.c[2], cw=model.L<.15?1.6:1;   // chroma is noisy on very dark irises
+  const skLo=sk?irisL+.35*(skL-irisL):0, skHi=sk?irisL+.75*(skL-irisL):0;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const i=y*w+x; gateMap[i]=1;
+    const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
+    const a=(dx*ux+dy*uy)/rx, b=(-dx*uy+dy*ux)/ry, rn2=a*a+b*b;
+    if(rn2>=1.21) continue;                                       // a little past the lens edge so the blur sees its surroundings
+    const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=L0[i];
+    // never paint over eyelid skin that leaks inside the contour (lagging landmarks while squinting)
+    let gate=1;
+    if(skinGate){
+      const dc=(Math.abs(R-sk[0])+Math.abs(G-sk[1])+Math.abs(B-sk[2]))/765;
+      gate=1-smooth(.11,.04,dc)*smooth(skLo,skHi,L);
+    }
+    // pixel must look like THIS person's iris (or pupil): hands, fingers, sclera and objects don't
+    const lr=Lb[i]/model.L;
+    let gp=1-smooth(1.7,2.5,lr);                                  // much brighter than the iris → not iris
+    if(lr>.55){ const sm=R+G+B+3;                                 // hue of a dark pixel is mostly noise: trust it in proportion to its brightness
+      const cd=(Math.abs(R/sm-mc0)+Math.abs(G/sm-mc1)+Math.abs(B/sm-mc2))*Math.min(1,sm/240);
+      gp*=1-smooth(.09*cw,.17*cw,cd); }
+    gateMap[i]=gate<gp?gate:gp;
+  }
+  const br=Math.max(1,Math.round(rx*.07));
+  boxBlur(gateMap,sTmp,w,h,br); boxBlur(gateMap,sTmp,w,h,br);     // two box passes ≈ gaussian
+
+  // pass 2b: composite
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
     const i=y*w+x, lid=mask[i*4+3]/255; if(lid<=0.004) continue;
     const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
     const a=(dx*ux+dy*uy)/rx, b=(-dx*uy+dy*ux)/ry, rn=Math.hypot(a,b);
     if(rn>=1) continue;
-    const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=(.299*R+.587*G+.114*B)/255;
-    // never paint over eyelid skin that leaks inside the contour (lagging landmarks while squinting)
-    let gate=1;
-    if(skinGate){
-      const dc=(Math.abs(R-sk[0])+Math.abs(G-sk[1])+Math.abs(B-sk[2]))/765;
-      gate=1-smooth(.11,.04,dc)*smooth(irisL+.35*(skL-irisL), irisL+.75*(skL-irisL), L);
-    }
-    // pixel must look like THIS person's iris (or pupil): hands, fingers, sclera and objects don't
-    { const lr=Lb[i]/model.L;
-      let gp=1-smooth(1.7,2.5,lr);                                  // much brighter than the iris → not iris
-      if(lr>.55){ const c=chroma(R,G,B), w=model.L<.15?1.6:1;       // chroma is noisy on very dark irises
-        const cd=Math.abs(c[0]-model.c[0])+Math.abs(c[1]-model.c[1])+Math.abs(c[2]-model.c[2]);
-        gp*=1-smooth(.09*w,.17*w,cd); }
-      gate=Math.min(gate,gp); }
-    const vis=lid*gate*openFade*occl;
+    const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=L0[i];
+    const vis=lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
     const pin=smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
@@ -615,12 +687,13 @@ function processFrame(source, W, H, lmList, t, useFilter){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
 
 /* ---------------- Model ---------------- */
+const perf=window.__perf={detect:0,render:0,delegate:""};          // smoothed ms per frame: tracking / lens compositing
 const MODEL_URLS = [
   "./face_landmarker.task",                            // bundled copy (when served over http)
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
@@ -646,15 +719,30 @@ async function fetchModel(){
   }
   throw new Error("Model download failed → "+errs.join(" | "));
 }
+// A software WebGL renderer (no usable GPU: VMs, remote desktops, blocklisted drivers) runs the "GPU" delegate
+// several times slower than the multithreaded-free XNNPACK CPU path, so try CPU first there. ?delegate=GPU|CPU overrides.
+function delegateOrder(){
+  const q=(new URLSearchParams(location.search).get("delegate")||"").toUpperCase();
+  if(q==="GPU"||q==="CPU") return [q, q==="GPU"?"CPU":"GPU"];
+  let soft=false;
+  try{ const gl=document.createElement("canvas").getContext("webgl2");
+    if(!gl) soft=true;
+    else{ const x=gl.getExtension("WEBGL_debug_renderer_info"), r=String(x?gl.getParameter(x.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER));
+      soft=/swiftshader|llvmpipe|software|basic render/i.test(r); gl.getExtension("WEBGL_lose_context")?.loseContext(); }
+  }catch{ soft=true; }
+  return soft ? ["CPU","GPU"] : ["GPU","CPU"];
+}
+let delegateUsed="";
 async function createLandmarker(model){
   let lastErr;
   for(const w of WASM_URLS){
     let fs;
     try{ fs=await FilesetResolver.forVisionTasks(w); }catch(e){ lastErr=new Error("WASM load failed ("+w.split("/")[2]+"): "+e.message); continue; }
-    for(const d of ["GPU","CPU"]){
+    for(const d of delegateOrder()){
       try{
-        return await FaceLandmarker.createFromOptions(fs,{ baseOptions:{ modelAssetBuffer:model, delegate:d },
+        const lmk=await FaceLandmarker.createFromOptions(fs,{ baseOptions:{ modelAssetBuffer:model, delegate:d },
           runningMode:"VIDEO", numFaces:1, minFaceDetectionConfidence:.5, minFacePresenceConfidence:.5, minTrackingConfidence:.5 });
+        delegateUsed=d; perf.delegate=d; return lmk;
       }catch(e){ console.warn(d+" delegate failed:", e); lastErr=new Error(d+" init failed: "+(e.message||e)); }
     }
   }
@@ -663,8 +751,8 @@ async function createLandmarker(model){
 async function init(localModel){
   try{
     if(!FaceLandmarker) throw new Error(LOCAL
-      ? "Could not load MediaPipe from ./vendor or any CDN"
-      : "Opened as a file and the CDNs are unreachable. Run start.bat / start.sh instead of double-clicking index.html");
+      ? "Could not load MediaPipe (vision_bundle.mjs) from this folder or any CDN"
+      : "Opened as a file and the CDNs are unreachable. Serve this folder (python3 -m http.server 8765) and open http://localhost:8765");
     setStatus("Downloading face model…");
     const model = localModel || await fetchModel();
     setStatus("Starting model…");
@@ -686,26 +774,47 @@ $("modelIn").addEventListener("change",async e=>{
 async function setMode(m){ if(mode!==m){ await landmarker.setOptions({runningMode:m}); mode=m; } }
 
 /* ---------------- Camera ---------------- */
-let stream=null, lastVT=-1, fpsAvg=0, lastT=0, rafId=0;
+let stream=null, lastVT=-1, fpsAvg=0, lastT=0, rafId=0, facing="user", lastFoundT=0;
 const frameCv=document.createElement("canvas"), frameCtx=frameCv.getContext("2d");
+function sizeOut(W,H){ out.width=W; out.height=H; vp.style.setProperty("--ar",W+" / "+H); }
+async function openStream(){
+  if(!navigator.mediaDevices?.getUserMedia){ setStatus("Camera needs HTTPS or http://localhost","err"); return false; }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:facing},audio:false});
+  }catch(e){
+    setStatus(e && e.name==="NotFoundError" ? "No camera found. Upload a photo instead" : "Camera blocked. Allow access, or open via https / http://localhost","err");
+    return false; }
+  video.srcObject=stream; await video.play();
+  // selfie view is mirrored; the back camera is not
+  const fm=stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+  mirrored = fm ? fm!=="environment" : facing==="user"; out.classList.toggle("mirror",mirrored);
+  resetFilters(); sizeOut(video.videoWidth,video.videoHeight);
+  return true;
+}
 async function startCamera(){
   if(stream){ stopCamera(); return; }
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"},audio:false});
-  }catch(e){ setStatus("Camera blocked — allow access or open via http://localhost","err"); return; }
-  video.srcObject=stream; await video.play();
-  await setMode("VIDEO"); resetFilters();
-  still=null; stillLm=null; mirrored=true; out.classList.add("mirror");
-  out.width=video.videoWidth; out.height=video.videoHeight;
+  if(!await openStream()) return;
+  await setMode("VIDEO");
+  still=null; stillLm=null;
   $("empty").style.display="none"; $("snapBtn").disabled=false; $("recBtn").disabled=false; fpsEl.style.display="";
-  $("camBtn").textContent="Stop camera"; updateSplitUI();
+  $("camBtn").textContent="Stop camera"; setStatus("Model ready","ok"); updateSplitUI();
+  try{ const n=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput").length;
+    $("flipBtn").style.display = n>1 ? "" : "none"; }catch{}
   loop();
+}
+async function flipCamera(){
+  if(!stream) return;
+  if(rec) stopRecording();
+  cancelAnimationFrame(rafId); stream.getTracks().forEach(t=>t.stop()); stream=null;
+  facing = facing==="user" ? "environment" : "user";
+  if(!await openStream()){ facing = facing==="user" ? "environment" : "user"; if(!await openStream()){ stream=null; stopCamera(); return; } }
+  updateSplitUI(); loop();
 }
 function stopCamera(){
   if(rec) stopRecording();
   $("recBtn").disabled=true;
-  cancelAnimationFrame(rafId); stream.getTracks().forEach(t=>t.stop()); stream=null;
-  $("camBtn").textContent="Start camera"; fpsEl.style.display="none";
+  cancelAnimationFrame(rafId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
+  $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
 function loop(){
@@ -713,12 +822,18 @@ function loop(){
   if(video.readyState<2 || video.currentTime===lastVT) return;
   lastVT=video.currentTime;
   const t=performance.now(), tProc=performance.now();
+  if(video.videoWidth && (video.videoWidth!==out.width || video.videoHeight!==out.height)){   // phone rotated
+    if(rec) stopRecording();
+    sizeOut(video.videoWidth,video.videoHeight); resetFilters(); updateSplitUI(); }
   // freeze ONE frame: detect and render on the same pixels, so the lens can't trail the eye
   if(frameCv.width!==out.width||frameCv.height!==out.height){ frameCv.width=out.width; frameCv.height=out.height; }
   frameCtx.drawImage(video,0,0,frameCv.width,frameCv.height);
   const res=landmarker.detectForVideo(frameCv,t);
+  const tDet=performance.now();
   const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true);
-  if(!found) resetFilters();
+  perf.detect+=(tDet-tProc-perf.detect)*.1; perf.render+=(performance.now()-tDet-perf.render)*.1;
+  // a dropped frame or two must not restart the smoothing (the lens would pop when the face comes back)
+  if(found) lastFoundT=t; else if(t-lastFoundT>250) resetFilters();
   $("hint").textContent = found ? "Tracking. Pick a lens on the right." : "No face found. Face the camera with your eyes visible.";
   if(lastT){ const f=1000/(t-lastT); fpsAvg=fpsAvg?fpsAvg*.9+f*.1:f; fpsEl.textContent=fpsAvg.toFixed(0)+" fps"; }
   lastT=t;
@@ -795,7 +910,7 @@ function stopRecording(){
   if(!rec) return; clearInterval(rec.timer);
   rec.log.note=noteEl.value.trim();                                  // final note (can be edited while recording)
   $("markBtn").style.display="none";
-  $("markInfo").textContent = rec.log.markers.length ? `Saved with ${rec.log.markers.length} mark(s)` : "Tip: while recording, press M when the issue appears";
+  $("markInfo").textContent = rec.log.markers.length ? `Saved with ${rec.log.markers.length} mark(s)` : "Start the camera, then record. Press M when the issue appears.";
   rec.log.settingsAtEnd={...S}; rec.log.lensAtEnd = currentPreset>=0 ? PRESETS[currentPreset].name : "custom upload";
   const R=rec; if(R.mr.state!=="inactive") R.mr.stop(); else saveRecording(R);
   rec=null; $("recBtn").classList.remove("on"); $("recLbl").textContent="Record";
@@ -812,24 +927,26 @@ function saveRecording(r){
   setTimeout(()=>setStatus("Model ready","ok"),8000);
 }
 $("recBtn").onclick=()=>{ rec ? stopRecording() : startRecording(); };
-$("camBtn").onclick=startCamera; $("camBtn2").onclick=startCamera;
+$("camBtn").onclick=startCamera; $("camBtn2").onclick=startCamera; $("flipBtn").onclick=flipCamera;
 
 /* ---------------- Photo ---------------- */
-$("photoIn").addEventListener("change",async e=>{
-  const f=e.target.files[0]; e.target.value=""; if(!f||!landmarker) return;
+$("photoIn").addEventListener("change",e=>{ const f=e.target.files[0]; e.target.value=""; loadPhoto(f); });
+async function loadPhoto(f){
+  if(!f||!landmarker) return;
+  const img=new Image(); img.src=URL.createObjectURL(f);
+  try{ await img.decode(); }catch{ $("hint").textContent="That file isn't an image this browser can open."; return; }
   if(stream) stopCamera();
-  const img=new Image(); img.src=URL.createObjectURL(f); await img.decode();
   const maxSide=1600, sc=Math.min(1,maxSide/Math.max(img.naturalWidth,img.naturalHeight));
   const W=Math.round(img.naturalWidth*sc), H=Math.round(img.naturalHeight*sc);
   const c=document.createElement("canvas"); c.width=W; c.height=H; c.getContext("2d").drawImage(img,0,0,W,H);
-  still=c; mirrored=false; out.classList.remove("mirror"); out.width=W; out.height=H;
+  still=c; mirrored=false; out.classList.remove("mirror"); sizeOut(W,H);
   await setMode("IMAGE");
   const res=landmarker.detect(c); stillLm=res.faceLandmarks;
   resetFilters(); if(stillLm.length){ processFrame(c,W,H,stillLm,0,false); }   // first pass measures both pupils
   $("empty").style.display="none"; $("snapBtn").disabled=false; updateSplitUI();
   $("hint").textContent = stillLm.length ? "Face found. Try different lenses on the right." : "No face found. Try a clearer, front-facing photo.";
   requestStill();
-});
+}
 let stillPending=false;
 function requestStill(){
   if(!still || stream || stillPending) return; stillPending=true;
@@ -837,7 +954,10 @@ function requestStill(){
 }
 
 /* ---------------- Before/after split ---------------- */
-const split=$("split"), vp=$("viewport");
+const split=$("split");
+for(const ev of ["dragenter","dragover"]) vp.addEventListener(ev,e=>{ if(e.dataTransfer?.types?.includes("Files")){ e.preventDefault(); vp.classList.add("drop"); } });
+for(const ev of ["dragleave","drop"]) vp.addEventListener(ev,()=>vp.classList.remove("drop"));
+vp.addEventListener("drop",e=>{ const f=[...(e.dataTransfer?.files||[])].find(f=>f.type.startsWith("image/")); if(f){ e.preventDefault(); loadPhoto(f); } });
 function updateSplitUI(){
   const on=S.compare && (stream||still);
   split.style.display=on?"block":"none"; $("tagL").style.display=on?"block":"none"; $("tagR").style.display=on?"block":"none";
@@ -853,7 +973,7 @@ function contentRect(){ // on-screen rect of the image inside the object-fit:con
 }
 let dragging=false;
 split.addEventListener("pointerdown",e=>{dragging=true;split.setPointerCapture(e.pointerId);});
-split.addEventListener("pointerup",()=>dragging=false);
+split.addEventListener("pointerup",()=>dragging=false); split.addEventListener("pointercancel",()=>dragging=false);
 split.addEventListener("pointermove",e=>{ if(!dragging) return;
   const r=contentRect(); S.split=Math.min(.98,Math.max(.02,(e.clientX-r.left)/r.width)); updateSplitUI(); requestStill(); });
 window.addEventListener("resize",updateSplitUI);
