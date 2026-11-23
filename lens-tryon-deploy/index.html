@@ -172,7 +172,7 @@
 
     <div>
       <h3>View</h3>
-      <div class="toggle">Natural tint (recolour my own iris) <input type="checkbox" id="natural" checked></div>
+      <div class="toggle">Natural tint (recolour my own iris) <input type="checkbox" id="natural"></div>
       <div class="toggle">Auto-fit pupil to your eye <input type="checkbox" id="autoPupil" checked></div>
       <div class="toggle">Before / after split <input type="checkbox" id="compare"></div>
       <div class="toggle">Show tracking overlay <input type="checkbox" id="debug"></div>
@@ -227,7 +227,7 @@ const CORNERS_A = [33,133], CORNERS_B = [263,362];
 const IRIS_1 = [468,469,470,471,472], IRIS_2 = [473,474,475,476,477];               // center + 4 contour pts
 
 /* ---------------- Settings ---------------- */
-const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare:false, debug:false, keyWhite:true, autoPupil:true, natural:true, split:.5 };
+const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare:false, debug:false, keyWhite:true, autoPupil:true, natural:false, split:.5 };
 ["intensity","size","pupil","texture","limbal"].forEach(k=>{
   const el=$(k), v=$("v_"+k);
   const show=()=>{ v.textContent = (+el.value).toFixed(2); };
@@ -238,19 +238,19 @@ const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare
   S[k]=e.target.checked; if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
 }));
 
-/* ---------------- Procedural lens textures ---------------- */
+/* ---------------- Lens textures: artwork in lenses/*.png (fibres, limbal ring, clear pupil hole); procedural fallback until loaded ---------------- */
 const TEX = 256;
 const PRESETS = [
-  { name:"Hazel",      inner:[176,128,48],  outer:[92,112,62],   ring:[38,32,18],  burst:[200,150,60], fiber:.9, opacity:.86 },
-  { name:"Ocean Blue", inner:[130,190,232], outer:[38,98,172],   ring:[14,28,62],  burst:null,         fiber:.85,opacity:.9 },
-  { name:"Emerald",    inner:[150,200,96],  outer:[28,124,72],   ring:[10,42,26],  burst:[190,180,80], fiber:.85,opacity:.9 },
-  { name:"Grey",       inner:[200,206,212], outer:[112,122,134], ring:[40,45,52],  burst:null,         fiber:.8, opacity:.9 },
-  { name:"Amethyst",   inner:[190,160,228], outer:[104,72,166],  ring:[38,22,60],  burst:null,         fiber:.85,opacity:.9 },
-  { name:"Honey",      inner:[236,178,78],  outer:[172,112,42],  ring:[62,36,10],  burst:null,         fiber:.85,opacity:.88 },
-  { name:"Turquoise",  inner:[132,226,214], outer:[22,150,162],  ring:[10,50,62],  burst:null,         fiber:.85,opacity:.9 },
-  { name:"Lime",       inner:[190,230,90],  outer:[96,170,40],   ring:[24,48,10],  burst:null,         fiber:.85,opacity:.9 },
-  { name:"Crimson",    inner:[236,52,52],   outer:[150,12,24],   ring:[28,0,0],    burst:null,         fiber:1,  opacity:1, fx:true },
-  { name:"Moon White", inner:[248,248,250], outer:[222,226,232], ring:[110,112,124],burst:null,        fiber:.5, opacity:1, fx:true },
+  { name:"Hazel", img:"hazel",      inner:[176,128,48],  outer:[92,112,62],   ring:[38,32,18],  burst:[200,150,60], fiber:.9, opacity:.86 },
+  { name:"Ocean Blue", img:"ocean-blue", inner:[130,190,232], outer:[38,98,172],   ring:[14,28,62],  burst:null,         fiber:.85,opacity:.9 },
+  { name:"Emerald", img:"emerald",    inner:[150,200,96],  outer:[28,124,72],   ring:[10,42,26],  burst:[190,180,80], fiber:.85,opacity:.9 },
+  { name:"Grey", img:"grey",       inner:[200,206,212], outer:[112,122,134], ring:[40,45,52],  burst:null,         fiber:.8, opacity:.9 },
+  { name:"Amethyst", img:"amethyst",   inner:[190,160,228], outer:[104,72,166],  ring:[38,22,60],  burst:null,         fiber:.85,opacity:.9 },
+  { name:"Honey", img:"honey",      inner:[236,178,78],  outer:[172,112,42],  ring:[62,36,10],  burst:null,         fiber:.85,opacity:.88 },
+  { name:"Turquoise", img:"turquoise",  inner:[132,226,214], outer:[22,150,162],  ring:[10,50,62],  burst:null,         fiber:.85,opacity:.9 },
+  { name:"Lime", img:"lime",       inner:[190,230,90],  outer:[96,170,40],   ring:[24,48,10],  burst:null,         fiber:.85,opacity:.9 },
+  { name:"Crimson", img:"crimson",    inner:[236,52,52],   outer:[150,12,24],   ring:[28,0,0],    burst:null,         fiber:1,  opacity:1, fx:true },
+  { name:"Moon White", img:"moon-white", inner:[248,248,250], outer:[222,226,232], ring:[110,112,124],burst:null,        fiber:.5, opacity:1, fx:true },
 ];
 
 function rng(seed){ return ()=>{ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
@@ -287,6 +287,15 @@ function makeProcedural(p, limbal){
 }
 
 let lensTex = null, lensMips = [], currentPreset = 0, customImg = null;
+const HOLE=.34, presetTex=[];                                    // pupil-hole radius drawn in the lens artwork (fraction of the lens radius)
+let lensHole=0;                                                  // hole radius of the active texture; the compositor stretches it to the real pupil. 0 = no hole
+function holeOf(data){                                           // radius where an uploaded lens becomes opaque, 0 if its centre is not clear
+  const ring=r=>{ let a=0; for(let k=0;k<48;k++){ const t=k/48*2*Math.PI, x=Math.round((.5+.5*r*Math.cos(t))*(TEX-1)), y=Math.round((.5+.5*r*Math.sin(t))*(TEX-1)); a+=data[(y*TEX+x)*4+3]; } return a/48; };
+  if(ring(.06)>64) return 0;
+  let mx=0; for(let r=.1;r<.95;r+=.02) mx=Math.max(mx,ring(r));
+  for(let r=.08;r<.7;r+=.01) if(ring(r)>mx*.5) return r;
+  return 0;
+}
 function setLensTex(data){                                       // level 0 = TEX², then halves (premultiplied box filter)
   lensTex=data; lensMips=[{n:TEX,d:data}];
   let src=data, n=TEX;
@@ -296,7 +305,15 @@ function setLensTex(data){                                       // level 0 = TE
       const o=(y*m+x)*4; if(a>0){ dst[o]=r/a; dst[o+1]=g/a; dst[o+2]=b/a; } dst[o+3]=a/4; }
     lensMips.push({n:m,d:dst}); src=dst; n=m; }
 }
-function rebuildLens(){ if(currentPreset>=0) setLensTex(makeProcedural(PRESETS[currentPreset], S.limbal)); }
+function rebuildLens(){
+  if(currentPreset<0) return;
+  const base=presetTex[currentPreset];
+  if(!base){ lensHole=0; setLensTex(makeProcedural(PRESETS[currentPreset], S.limbal)); return; }
+  const d=new Uint8ClampedArray(base), k=(S.limbal-.6)*1.2;       // the artwork has its ring at slider .6; darken or lighten it from there
+  if(k) for(let y=0;y<TEX;y++)for(let x=0;x<TEX;x++){ const g=1-k*smooth(.78,.96,Math.hypot((x+.5)/TEX*2-1,(y+.5)/TEX*2-1));
+    if(g!==1){ const o=(y*TEX+x)*4; d[o]*=g; d[o+1]*=g; d[o+2]*=g; } }
+  lensHole=HOLE; setLensTex(d);
+}
 
 /* swatches */
 const sw = $("swatches");
@@ -313,7 +330,7 @@ function renderSwatches(){
   sw.innerHTML="";
   PRESETS.forEach((p,i)=>{
     const el=document.createElement("div"); el.className="sw"+(i===currentPreset?" active":"");
-    const cv=document.createElement("canvas"); texToCanvas(makeProcedural(p,.6),cv);
+    const cv=document.createElement("canvas"); texToCanvas(presetTex[i]||makeProcedural(p,.6),cv);
     const sp=document.createElement("span"); sp.textContent=p.name+(p.fx?" ✦":"");
     el.append(cv,sp); el.onclick=()=>{ currentPreset=i; rebuildLens(); markActive(el); requestStill(); };
     sw.append(el);
@@ -321,6 +338,12 @@ function renderSwatches(){
 }
 function markActive(el){ sw.querySelectorAll(".sw").forEach(e=>e.classList.remove("active")); el.classList.add("active"); }
 renderSwatches(); rebuildLens();
+PRESETS.forEach((p,i)=>{ const im=new Image();
+  im.onload=()=>{ const t=document.createElement("canvas"); t.width=t.height=TEX; const tc=t.getContext("2d",{willReadFrequently:true});
+    tc.drawImage(im,0,0,TEX,TEX); presetTex[i]=tc.getImageData(0,0,TEX,TEX).data;
+    texToCanvas(presetTex[i], sw.children[i].querySelector("canvas"));
+    if(currentPreset===i){ rebuildLens(); requestStill(); } };
+  im.src="lenses/"+p.img+".png"; });
 
 /* custom lens upload */
 function buildCustomLens(img){
@@ -339,7 +362,7 @@ function buildCustomLens(img){
   const side=Math.max(maxX-minX,maxY-minY)+1, cxm=(minX+maxX)/2, cym=(minY+maxY)/2;
   const t=document.createElement("canvas"); t.width=t.height=TEX; const tc=t.getContext("2d",{willReadFrequently:true});
   tc.drawImage(c, cxm-side/2, cym-side/2, side, side, 0, 0, TEX, TEX);
-  setLensTex(tc.getImageData(0,0,TEX,TEX).data);
+  setLensTex(tc.getImageData(0,0,TEX,TEX).data); lensHole=holeOf(lensTex);
   currentPreset = -1;
   // swatch for custom
   let el=sw.querySelector(".sw.custom");
@@ -745,10 +768,14 @@ function applyLens(g, W, H){
     const R=d[o]-nz, G=d[o+1]-nz, B=d[o+2]-nz;                  // lens is computed against the denoised pixel, so the grain stays in the frame untouched
     const vis=lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
-    const s=sampleTex(a*.5+.5,b*.5+.5,mip);
+    // the lens's pupil hole follows the wearer's pupil: stretch the texture radially so its hole edge lands on the real pupil edge
+    let tu=a, tv=b, rt=rn;
+    if(lensHole>0 && rn>1e-4){ rt=rn<pupil ? rn*lensHole/pupil : lensHole+(rn-pupil)*(1-lensHole)/(1-pupil); tu=a*rt/rn; tv=b*rt/rn; }
+    const s=sampleTex(tu*.5+.5,tv*.5+.5,mip);
     let sh;
     if(natural){
-      const f0=s[0],f1=s[1],f2=s[2],fa=s[3]; sampleTex(a*.5+.5,b*.5+.5,mipC);
+      const f0=s[0],f1=s[1],f2=s[2]; let fa=s[3]; sampleTex(tu*.5+.5,tv*.5+.5,mipC);
+      if(lensHole>0 && rt<lensHole+.22) fa=Math.max(fa,230);      // a tint starts at the pupil edge; the hole's feathering is for the opaque lens
       s[0]+=(f0-s[0])*.3; s[1]+=(f1-s[1])*.3; s[2]+=(f2-s[2])*.3; s[3]=fa;
       const gy=.299*s[0]+.587*s[1]+.114*s[2], cl=Math.max(.02,gy/255);
       s[0]+=(gy-s[0])*.22; s[1]+=(gy-s[1])*.22; s[2]+=(gy-s[2])*.22;   // real irises are far less saturated than a colour swatch
@@ -756,7 +783,7 @@ function applyLens(g, W, H){
       const own=Math.min(1.7,Math.max(.3,Lb[i]/irisL));           // the eye's own light/dark detail, at full strength
       sh=lift*(1+(own-1)*(own<1?1:.8)*Math.min(1,S.texture/.55))*(.6+.4*expo);   // slider default (.55) = full strength
     }
-    const pin=natural?smooth(pupil-.1,pupil+.05,rn):smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
+    const pin=natural?smooth(pupil-.1,pupil+.05,rn):lensHole>0?smooth(pupil-.08,pupil-.01,rn):smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
     let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.86,.99,rn))*pin;   // fade before the limbus (no glow on the sclera)
     if(!natural){ sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=(1+(sh-1)*S.texture)*expo; }  // natural shading; capped so sclera/skin can't brighten it
     let nr=R+(s[0]*sh-R)*alpha, ng=G+(s[1]*sh-G)*alpha, nb=B+(s[2]*sh-B)*alpha;

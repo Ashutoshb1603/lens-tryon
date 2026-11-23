@@ -28,6 +28,7 @@ All files sit side by side in this folder:
 
 ```
 index.html                         app (UI, tracking, lens rendering)
+lenses/*.png                       lens artwork: RGBA, fibres + limbal ring + clear pupil hole (regenerate with ../tools/make_lenses.py)
 vision_bundle.mjs                  @mediapipe/tasks-vision 0.10.14 (Apache-2.0)
 vision_wasm_internal.js / .wasm    MediaPipe WASM runtime (SIMD)
 vision_wasm_nosimd_internal.js / .wasm   MediaPipe WASM runtime (no SIMD)
