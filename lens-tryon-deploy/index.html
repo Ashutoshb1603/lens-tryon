@@ -909,7 +909,7 @@ async function startCamera(){
 async function flipCamera(){
   if(!stream) return;
   if(rec) stopRecording();
-  cancelLoop(); stream.getTracks().forEach(t=>t.stop()); stream=null;
+  cancelAnimationFrame(rafId); stream.getTracks().forEach(t=>t.stop()); stream=null;
   facing = facing==="user" ? "environment" : "user";
   if(!await openStream()){ facing = facing==="user" ? "environment" : "user"; if(!await openStream()){ stream=null; stopCamera(); return; } }
   updateSplitUI(); loop();
@@ -917,17 +917,14 @@ async function flipCamera(){
 function stopCamera(){
   if(rec) stopRecording();
   $("recBtn").disabled=true;
-  cancelLoop(); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
+  cancelAnimationFrame(rafId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
 const DET_MAX=(v=>v>=256?v:800)(+new URLSearchParams(location.search).get("det"));   // ?det=N overrides; too small / invalid → default
 const detCv=document.createElement("canvas"), detCtx=detCv.getContext("2d",{willReadFrequently:true});
-// run as soon as the camera delivers a frame (not on the next screen refresh): less delay between moving and seeing it
-const useVfc=!!HTMLVideoElement.prototype.requestVideoFrameCallback;
-function cancelLoop(){ if(useVfc) video.cancelVideoFrameCallback(rafId); else cancelAnimationFrame(rafId); }
 function loop(){
-  rafId=useVfc?video.requestVideoFrameCallback(loop):requestAnimationFrame(loop);
+  rafId=requestAnimationFrame(loop);
   if(video.readyState<2 || video.currentTime===lastVT) return;
   lastVT=video.currentTime;
   const t=performance.now(), tProc=performance.now();
