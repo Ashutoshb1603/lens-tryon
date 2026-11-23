@@ -291,8 +291,8 @@ const HOLE=.34, presetTex=[];                                    // pupil-hole r
 let lensHole=0;                                                  // hole radius of the active texture; the compositor stretches it to the real pupil. 0 = no hole
 function holeOf(data){                                           // radius where an uploaded lens becomes opaque, 0 if its centre is not clear
   const ring=r=>{ let a=0; for(let k=0;k<48;k++){ const t=k/48*2*Math.PI, x=Math.round((.5+.5*r*Math.cos(t))*(TEX-1)), y=Math.round((.5+.5*r*Math.sin(t))*(TEX-1)); a+=data[(y*TEX+x)*4+3]; } return a/48; };
-  if(ring(.06)>64) return 0;
   let mx=0; for(let r=.1;r<.95;r+=.02) mx=Math.max(mx,ring(r));
+  if(ring(.06)>mx*.25) return 0;                                  // relative to the lens's own opacity, so a faint lens with a printed centre has no hole
   for(let r=.08;r<.7;r+=.01) if(ring(r)>mx*.5) return r;
   return 0;
 }
