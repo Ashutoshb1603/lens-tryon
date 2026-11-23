@@ -377,14 +377,14 @@ class Slow{ constructor(tau=6){ this.tau=tau; this.reset(); }
   hold(t){ this.t=t; return this.x; }
   reset(){ this.x=null; this.n=0; } }
 const gazeRaw=[null,null], gazeMean=[null,null]; let gazeOff=null;
-const LAG=.05;                                                    // the lens may trail the tracked eye by at most this many iris radii
+const LAG=.08;                                                    // the lens may trail the tracked eye by at most this many iris radii
 const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(1,.4),uy:new OneEuro(1,.4),
   pr:new OneEuro(.15,.02),op:new OneEuro(4,.5),ratio:new Slow(6),
   // eye-anchored placement: corners follow the head fast; the iris position *inside* the eye is smoothed hard
   mx:new OneEuro(1.5,.8,.6,LAG), my:new OneEuro(1.5,.8,.6,LAG), ew:new OneEuro(1,.5,.6,LAG*2), gu:new OneEuro(.7,4,1,LAG*.2), gv:new OneEuro(.7,4,1,LAG*.2),
   wr:new Slow(4)}));
 const ratioRaw=[null,null];
-const irisModel=[null,null], eyeVis=[1,1], eyeBad=[0,0], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
+const irisModel=[null,null], eyeVis=[1,1], eyeBad=[0,0], eyeSpeed=[0,0], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
 const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(1,.8,.6,LAG*1.5),new OneEuro(1,.8,.6,LAG*1.5)]));
 const PUPIL_PRIOR=.4;                                            // typical indoor pupil/iris ratio
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
@@ -588,17 +588,27 @@ function applyLens(g, W, H){
     const lr=irisL/model.L;
     matchOK = lr<1.85 && lr>.4 && cd<(model.L<.15?.18:.13);         // a hand reads ~3x brighter: wide margin
   }
-  const eyeOK = iN>4 && (model ? (matchOK && (contrastOK || !sk)) : contrastOK);
+  // Half-covered eye: the typical ring pixel may be the cover, yet a good part of the iris still shows. Count the ring
+  // pixels that still look like the learnt iris; the per-pixel matte below then draws the lens on just those.
+  let partOK=false;
+  if(model && !matchOK && ring.length>12){
+    let n=0; const thr=(model.L<.15?.18:.13)*1.4;
+    for(const o of ring){ const L=lum(o)/model.L; if(L>1.85||L<.4) continue; const c=chroma(d[o],d[o+1],d[o+2]);
+      if(Math.abs(c[0]-model.c[0])+Math.abs(c[1]-model.c[1])+Math.abs(c[2]-model.c[2])<thr) n++; }
+    partOK = n>ring.length*.3;
+  }
+  const eyeOK = iN>4 && (model ? (matchOK && (contrastOK || !sk)) : contrastOK), shown = eyeOK || partOK;
   if(g.useFilter){
     const dt=eyeVisT[g.slot]==null?.033:Math.min(.2,Math.max(.001,(g.t-eyeVisT[g.slot])/1000)); eyeVisT[g.slot]=g.t;
     // eye speed in iris-radii per second; during fast head motion the sample smears, so never *hide* then
     const la=eyeLast[g.slot]; eyeLast[g.slot]=[g.cx,g.cy];
-    const speed = la ? Math.hypot(g.cx-la[0],g.cy-la[1])/Math.max(1,g.rx)/dt : 0;
+    eyeSpeed[g.slot] = la ? Math.hypot(g.cx-la[0],g.cy-la[1])/Math.max(1,g.rx)/dt : 0;
+    const speed=Math.min(eyeSpeed[0],eyeSpeed[1]);                  // the head moves both eyes; one jumping alone is a covered eye
     // A single odd frame (blink, lashes, a noisy dark frame) is not a hand: only hide once the eye has looked wrong for
     // ~80 ms, and not while it is nearly shut (then the sample is lid and lashes, and the lid mask already hides the lens).
-    eyeBad[g.slot] = (eyeOK || g.open<.16) ? 0 : eyeBad[g.slot]+dt;
+    eyeBad[g.slot] = (shown || g.open<.16) ? 0 : eyeBad[g.slot]+dt;
     const hide=eyeBad[g.slot]>.08 && speed<8, tau=hide?.04:.05;     // hide in ~40 ms, come back in ~50 ms
-    if(hide || eyeOK) eyeVis[g.slot] += ((hide?0:1) - eyeVis[g.slot]) * (1-Math.exp(-dt/tau));
+    if(hide || shown) eyeVis[g.slot] += ((hide?0:1) - eyeVis[g.slot]) * (1-Math.exp(-dt/tau));
     if(eyeOK && contrastOK && g.open>.18 && curC){                      // learn the iris slowly, only from clean frames
       if(!model) irisModel[g.slot]=model={L:irisL, c:curC};
       else { model.L+=(irisL-model.L)*.03; model.c=model.c.map((v,j)=>v+(curC[j]-v)*.03); }
@@ -879,6 +889,9 @@ async function init(localModel){
 $("modelIn").addEventListener("change",async e=>{
   const f=e.target.files[0]; e.target.value=""; if(f) init(new Uint8Array(await f.arrayBuffer()));
 });
+// The landmarker's VIDEO mode smooths landmarks over time, which leaves the iris points ~0.25 iris radii behind a moving
+// head. Detecting every camera frame from scratch keeps them on the eye; our own filters handle the jitter. ?im=0 → VIDEO mode.
+const IMGMODE=new URLSearchParams(location.search).get("im")!=="0";
 async function setMode(m){ if(mode!==m){ await landmarker.setOptions({runningMode:m}); mode=m; } }
 
 /* ---------------- Camera ---------------- */
@@ -902,7 +915,7 @@ async function openStream(){
 async function startCamera(){
   if(stream){ stopCamera(); return; }
   if(!await openStream()) return;
-  await setMode("VIDEO");
+  await setMode(IMGMODE?"IMAGE":"VIDEO");
   still=null; stillLm=null; irisModel[0]=irisModel[1]=null;                 // a new session may be a different person
   $("empty").style.display="none"; $("snapBtn").disabled=false; $("recBtn").disabled=false; fpsEl.style.display="";
   $("camBtn").textContent="Stop camera"; setStatus("Model ready","ok"); updateSplitUI();
@@ -943,7 +956,7 @@ function loop(){
   if(dk<.8){ const dw=Math.round(out.width*dk), dh=Math.round(out.height*dk);
     if(detCv.width!==dw||detCv.height!==dh){ detCv.width=dw; detCv.height=dh; }
     detCtx.drawImage(frameCv,0,0,dw,dh); detSrc=detCv; }
-  const res=landmarker.detectForVideo(detSrc,t);
+  const res=(IMGMODE?landmarker.detect(detSrc):landmarker.detectForVideo(detSrc,t));
   const tDet=performance.now();
   const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true);
   perf.detect+=(tDet-tProc-perf.detect)*.1; perf.render+=(performance.now()-tDet-perf.render)*.1;
