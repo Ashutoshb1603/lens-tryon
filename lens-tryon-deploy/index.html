@@ -740,7 +740,7 @@ function applyLens(g, W, H){
       s[0]+=(gy-s[0])*.22; s[1]+=(gy-s[1])*.22; s[2]+=(gy-s[2])*.22;   // real irises are far less saturated than a colour swatch
       const lift=(irisL+(cl-irisL)*.58)/cl;                       // a dark eye stays darker than the lens swatch, as under a real tinted lens
       const own=Math.min(1.7,Math.max(.3,Lb[i]/irisL));           // the eye's own light/dark detail, at full strength
-      sh=lift*(own<1?own:1+(own-1)*.8)*(.6+.4*expo);
+      sh=lift*(1+(own-1)*(own<1?1:.8)*Math.min(1,S.texture/.55))*(.6+.4*expo);   // slider default (.55) = full strength
     }
     const pin=smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
     let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.86,.99,rn))*pin;   // fade before the limbus (no glow on the sclera)
