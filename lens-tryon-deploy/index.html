@@ -376,7 +376,7 @@ class Slow{ constructor(tau=6){ this.tau=tau; this.reset(); }
   hold(t){ this.t=t; return this.x; }
   reset(){ this.x=null; this.n=0; } }
 const gazeRaw=[null,null], gazeMean=[null,null]; let gazeOff=null;
-const LAG=.1;                                                    // the lens may trail the tracked eye by at most this many iris radii
+const LAG=.05;                                                    // the lens may trail the tracked eye by at most this many iris radii
 const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(1,.4),uy:new OneEuro(1,.4),
   pr:new OneEuro(.15,.02),op:new OneEuro(4,.5),ratio:new Slow(6),
   // eye-anchored placement: corners follow the head fast; the iris position *inside* the eye is smoothed hard
@@ -909,7 +909,7 @@ async function startCamera(){
 async function flipCamera(){
   if(!stream) return;
   if(rec) stopRecording();
-  cancelAnimationFrame(rafId); stream.getTracks().forEach(t=>t.stop()); stream=null;
+  cancelLoop(); stream.getTracks().forEach(t=>t.stop()); stream=null;
   facing = facing==="user" ? "environment" : "user";
   if(!await openStream()){ facing = facing==="user" ? "environment" : "user"; if(!await openStream()){ stream=null; stopCamera(); return; } }
   updateSplitUI(); loop();
@@ -917,14 +917,17 @@ async function flipCamera(){
 function stopCamera(){
   if(rec) stopRecording();
   $("recBtn").disabled=true;
-  cancelAnimationFrame(rafId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
+  cancelLoop(); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
 const DET_MAX=(v=>v>=256?v:800)(+new URLSearchParams(location.search).get("det"));   // ?det=N overrides; too small / invalid → default
 const detCv=document.createElement("canvas"), detCtx=detCv.getContext("2d",{willReadFrequently:true});
+// run as soon as the camera delivers a frame (not on the next screen refresh): less delay between moving and seeing it
+const useVfc=!!HTMLVideoElement.prototype.requestVideoFrameCallback;
+function cancelLoop(){ if(useVfc) video.cancelVideoFrameCallback(rafId); else cancelAnimationFrame(rafId); }
 function loop(){
-  rafId=requestAnimationFrame(loop);
+  rafId=useVfc?video.requestVideoFrameCallback(loop):requestAnimationFrame(loop);
   if(video.readyState<2 || video.currentTime===lastVT) return;
   lastVT=video.currentTime;
   const t=performance.now(), tProc=performance.now();
