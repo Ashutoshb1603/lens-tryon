@@ -608,7 +608,7 @@ function applyLens(g, W, H){
   }
   const occl = g.useFilter ? eyeVis[g.slot] : 1;
   g.dbg={vis:+occl.toFixed(2), irisL:+irisL.toFixed(3), skL:+skL.toFixed(3), mL:model?+model.L.toFixed(3):null, contrastOK, matchOK, iN};
-  if(occl<.02) return;
+  if(occl<.02 || !model) return;                                   // no iris learnt yet (e.g. camera started on a nearly shut eye)
   let ox=0, oy=0, pupilEst=null, pupilRGB=[22,20,20], seen=false;
   if(inner.length>20){
     let target=inner.length*.15, acc=0, pL=0;
