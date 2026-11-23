@@ -383,13 +383,13 @@ const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:ne
   mx:new OneEuro(1.5,.8,.6,LAG), my:new OneEuro(1.5,.8,.6,LAG), ew:new OneEuro(1,.5,.6,LAG*2), gu:new OneEuro(.7,4,1,LAG*.2), gv:new OneEuro(.7,4,1,LAG*.2),
   wr:new Slow(4)}));
 const ratioRaw=[null,null];
-const irisModel=[null,null], eyeVis=[1,1], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
+const irisModel=[null,null], eyeVis=[1,1], eyeBad=[0,0], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
 const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(1,.8,.6,LAG*1.5),new OneEuro(1,.8,.6,LAG*1.5)]));
 const PUPIL_PRIOR=.4;                                            // typical indoor pupil/iris ratio
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
 const resetFilters=()=>{ filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
   pupilRaw[0]=pupilRaw[1]=null; ratioRaw[0]=ratioRaw[1]=null; pupilMem[0]=pupilMem[1]=null; pupilShown[0]=pupilShown[1]=null; offMem[0]=offMem[1]=null; statMem[0]={}; statMem[1]={};
-  eyeVis[0]=eyeVis[1]=1; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; sigmaMem[0]=sigmaMem[1]=null; gazeRaw[0]=gazeRaw[1]=null; gazeMean[0]=gazeMean[1]=null; gazeOff=null; };          // irisModel survives brief tracking loss
+  eyeVis[0]=eyeVis[1]=1; eyeBad[0]=eyeBad[1]=0; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; sigmaMem[0]=sigmaMem[1]=null; gazeRaw[0]=gazeRaw[1]=null; gazeMean[0]=gazeMean[1]=null; gazeOff=null; };          // irisModel survives brief tracking loss
 
 /* ---------------- Eye geometry ---------------- */
 function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
@@ -522,7 +522,7 @@ function softenInto(src, w, h, sigma){                           // gaussian-ish
 }
 const sigmaMem=[null,null];
 function applyLens(g, W, H){
-  const openFade=smooth(.08,.16,g.open);                        // fade out while blinking / heavy squint
+  const openFade=smooth(.06,.12,g.open);                        // fade out while blinking / heavy squint
   if(openFade<=0.01 || g.rx < 2.5) return;
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   for(const p of g.poly){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
@@ -593,8 +593,11 @@ function applyLens(g, W, H){
     // eye speed in iris-radii per second; during fast head motion the sample smears, so never *hide* then
     const la=eyeLast[g.slot]; eyeLast[g.slot]=[g.cx,g.cy];
     const speed = la ? Math.hypot(g.cx-la[0],g.cy-la[1])/Math.max(1,g.rx)/dt : 0;
-    const tau=eyeOK?.12:.04;                                        // hide in ~40 ms, fade back in over ~120 ms
-    if(eyeOK || speed<8) eyeVis[g.slot] += ((eyeOK?1:0) - eyeVis[g.slot]) * (1-Math.exp(-dt/tau));
+    // A single odd frame (blink, lashes, a noisy dark frame) is not a hand: only hide once the eye has looked wrong for
+    // ~80 ms, and not while it is nearly shut (then the sample is lid and lashes, and the lid mask already hides the lens).
+    eyeBad[g.slot] = (eyeOK || g.open<.16) ? 0 : eyeBad[g.slot]+dt;
+    const hide=eyeBad[g.slot]>.08 && speed<8, tau=hide?.04:.05;     // hide in ~40 ms, come back in ~50 ms
+    if(hide || eyeOK) eyeVis[g.slot] += ((hide?0:1) - eyeVis[g.slot]) * (1-Math.exp(-dt/tau));
     if(eyeOK && contrastOK && g.open>.18 && curC){                      // learn the iris slowly, only from clean frames
       if(!model) irisModel[g.slot]=model={L:irisL, c:curC};
       else { model.L+=(irisL-model.L)*.03; model.c=model.c.map((v,j)=>v+(curC[j]-v)*.03); }
@@ -738,11 +741,11 @@ function applyLens(g, W, H){
       s[0]+=(f0-s[0])*.3; s[1]+=(f1-s[1])*.3; s[2]+=(f2-s[2])*.3; s[3]=fa;
       const gy=.299*s[0]+.587*s[1]+.114*s[2], cl=Math.max(.02,gy/255);
       s[0]+=(gy-s[0])*.22; s[1]+=(gy-s[1])*.22; s[2]+=(gy-s[2])*.22;   // real irises are far less saturated than a colour swatch
-      const lift=(irisL+(cl-irisL)*.58)/cl;                       // a dark eye stays darker than the lens swatch, as under a real tinted lens
+      const lift=(irisL+(cl-irisL)*.4)/cl;                     // a dark eye stays darker than the lens swatch, as under a real tinted lens
       const own=Math.min(1.7,Math.max(.3,Lb[i]/irisL));           // the eye's own light/dark detail, at full strength
       sh=lift*(1+(own-1)*(own<1?1:.8)*Math.min(1,S.texture/.55))*(.6+.4*expo);   // slider default (.55) = full strength
     }
-    const pin=smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
+    const pin=natural?smooth(pupil-.1,pupil+.05,rn):smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
     let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.86,.99,rn))*pin;   // fade before the limbus (no glow on the sclera)
     if(!natural){ sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=(1+(sh-1)*S.texture)*expo; }  // natural shading; capped so sclera/skin can't brighten it
     let nr=R+(s[0]*sh-R)*alpha, ng=G+(s[1]*sh-G)*alpha, nb=B+(s[2]*sh-B)*alpha;
