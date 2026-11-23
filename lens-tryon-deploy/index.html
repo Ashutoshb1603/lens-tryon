@@ -921,7 +921,7 @@ function stopCamera(){
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
-const DET_MAX=+(new URLSearchParams(location.search).get("det")||800);
+const DET_MAX=(v=>v>=256?v:800)(+new URLSearchParams(location.search).get("det"));   // ?det=N overrides; too small / invalid → default
 const detCv=document.createElement("canvas"), detCtx=detCv.getContext("2d",{willReadFrequently:true});
 function loop(){
   rafId=requestAnimationFrame(loop);
