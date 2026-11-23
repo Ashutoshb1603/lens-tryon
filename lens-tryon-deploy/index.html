@@ -921,6 +921,8 @@ function stopCamera(){
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
+const DET_MAX=+(new URLSearchParams(location.search).get("det")||800);
+const detCv=document.createElement("canvas"), detCtx=detCv.getContext("2d",{willReadFrequently:true});
 function loop(){
   rafId=requestAnimationFrame(loop);
   if(video.readyState<2 || video.currentTime===lastVT) return;
@@ -932,7 +934,12 @@ function loop(){
   // freeze ONE frame: detect and render on the same pixels, so the lens can't trail the eye
   if(frameCv.width!==out.width||frameCv.height!==out.height){ frameCv.width=out.width; frameCv.height=out.height; }
   frameCtx.drawImage(video,0,0,frameCv.width,frameCv.height);
-  const res=landmarker.detectForVideo(frameCv,t);
+  // track on a smaller copy: the model works on a ~256 px face crop anyway, and a big frame only costs upload time
+  let detSrc=frameCv; const dk=DET_MAX/Math.max(out.width,out.height);
+  if(dk<.8){ const dw=Math.round(out.width*dk), dh=Math.round(out.height*dk);
+    if(detCv.width!==dw||detCv.height!==dh){ detCv.width=dw; detCv.height=dh; }
+    detCtx.drawImage(frameCv,0,0,dw,dh); detSrc=detCv; }
+  const res=landmarker.detectForVideo(detSrc,t);
   const tDet=performance.now();
   const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true);
   perf.detect+=(tDet-tProc-perf.detect)*.1; perf.render+=(performance.now()-tDet-perf.render)*.1;
