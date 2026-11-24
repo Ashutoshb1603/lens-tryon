@@ -14,7 +14,7 @@ The MediaPipe runtime and models are bundled in `vendor/` and `models/`, so it w
 
 ## Features
 
-- 7 hats, all real 3D models: knit beanie (photo-scanned), bucket hat, flat cap, fedora, bowler, straw hat and officer's cap (see CREDITS.md).
+- 8 hats, all real 3D models: knit beanie (photo-scanned), bucket hat, flat cap, Dipper cap, fedora, bowler, straw hat and officer's cap (see CREDITS.md).
 - Upload your own hat image (PNG/JPG product photo). A plain background is removed automatically; a transparent PNG is used as is.
 - Fit controls: size, height on head, left/right, tilt, crown height, tip forward/back. You can also drag the hat and scroll to resize.
 - The hat is lit like the picture: brightness, colour tone and light side are read from the face, and the hat shades the forehead.

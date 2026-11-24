@@ -148,9 +148,10 @@ function viewTilt(t0) {
 function disposeGroup(g) { g.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.bumpMap?.dispose(); o.material.dispose(); } }); }
 /* A 3D hat file (glTF/GLB) is brought into head widths: its crown, measured above any brim, is scaled to the head band,
    centred, and set down so the band is at y = 0. Assumes y up and the front towards +z, as glTF asks.
-   o.ref / o.base / o.cref (fractions of the model's height, from the bottom) override where the head band is measured,
+   o.turn (radians about y) turns a model that does not face +z. o.ref / o.base / o.cref (fractions of the model's height, from the bottom) override where the head band is measured,
    where it sits and where the crown is centred: for crowns that bulge out above the band (peaked caps) or visors that stick forward instead of out. */
 function fitModel(obj, o = {}) {
+  if (o.turn) obj.rotateY(o.turn);   // model built facing -z (or sideways): turn it to face +z first
   obj.updateMatrixWorld(true);
   const pts = [], v = new THREE.Vector3();
   obj.traverse(o => { if (!o.isMesh || o.isSkinnedMesh) return; const p = o.geometry.attributes.position, st = Math.max(1, Math.floor(p.count / 20000)); for (let i = 0; i < p.count; i += st) { v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); pts.push(v.x, v.y, v.z); } });

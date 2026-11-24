@@ -6,6 +6,7 @@
 | Bucket | Bucket Hat | oluwaphemi | CC BY 4.0 | https://sketchfab.com/3d-models/bucket-hat-5206aa93bce448a8b936ce763cfc245d |
 | Flat cap | Flat Cap | Fridge (youssefdarwish01) | CC BY 4.0 | https://sketchfab.com/3d-models/flat-cap-bd196ab9e2d8441798177839b9e66e09 |
 | Bowler | Bowler Hat | Joycestick (piperno.b) | CC BY 4.0 | https://sketchfab.com/3d-models/bowler-hat-3c3f5bfb98284924a70cf410ab532bc9 |
+| Dipper cap | Dipper's cap | Nick Pekarsky (kolumba1991) | CC BY 4.0 for the 3D model; the cap design and pine-tree logo are from Disney's Gravity Falls and are not covered by that licence | https://sketchfab.com/3d-models/dippers-cap-6b247c088f034d09908d4ee78c39dd18 |
 | Fedora | Classic Fedora Hat | ghostmachinesing | CC BY 4.0 | https://sketchfab.com/3d-models/classic-fedora-hat-f0e1a3f3cbc94b3187b618c325334bad |
 | Straw hat | Unisex Summer Straw Hat | arloopa | Sketchfab Standard (not CC: may be used in an app, but the model file may not be shared on its own) | https://sketchfab.com/3d-models/unisex-summer-straw-hat-be7bdce89a9942b6bb1dd6bef9632652 |
 | Officer | Military Hat | aSocialCrab | CC BY 4.0 | https://sketchfab.com/3d-models/military-hat-6d1a59873e34488e8ea0bc7732afd7d1 |
