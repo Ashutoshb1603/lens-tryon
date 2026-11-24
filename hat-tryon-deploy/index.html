@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hat Try-On — Live Virtual Hat Preview</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='23' rx='15' ry='4' fill='%237c9cff'/%3E%3Cpath d='M7 23c0-12 3-17 9-17s9 5 9 17z' fill='%235b7be0'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#151821; --panel2:#1b1f2a; --line:#262b38;
+    --text:#e9ecf2; --muted:#8b93a7; --accent:#7c9cff; --accent2:#5ee0c6;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px}
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:.2px}
+  .brand svg{width:26px;height:26px}
+  .status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+  .pill{padding:4px 10px;border-radius:999px;background:var(--panel2);border:1px solid var(--line)}
+  .pill.ok{color:var(--accent2)} .pill.err{color:#ff7b7b}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;padding:18px 22px;
+    height:calc(100% - 59px)}
+  @media (max-width:900px){main{grid-template-columns:1fr;height:auto}}
+  .stage{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .viewport{position:relative;flex:1;min-height:360px;background:#07080b;border:1px solid var(--line);
+    border-radius:var(--radius);overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+  .viewport canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+  .viewport canvas.mirror{transform:scaleX(-1)}
+  #ovl{pointer-events:none}
+  .viewport.live{cursor:grab} .viewport.live:active{cursor:grabbing}
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;text-align:center;color:var(--muted);padding:20px}
+  .empty h2{margin:0;color:var(--text);font-size:20px;font-weight:600}
+  .empty p{margin:0;max-width:420px;line-height:1.5}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button,.btn{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+    padding:9px 14px;border-radius:10px;font:inherit;font-weight:500;cursor:pointer;transition:.15s;
+    display:inline-flex;align-items:center;gap:8px;user-select:none}
+  button:hover,.btn:hover{border-color:#3a4256;background:#222736}
+  button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.small{padding:5px 10px;font-size:12.5px}
+  .stagebar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .hint{color:var(--muted);font-size:12.5px}
+  aside{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;
+    overflow:auto;display:flex;flex-direction:column;gap:18px}
+  aside h3{margin:0 0 10px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600;
+    display:flex;justify-content:space-between;align-items:center}
+  .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .sw{display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;padding:6px 2px;border-radius:10px;
+    border:1px solid transparent}
+  .sw canvas{width:60px;height:60px;border-radius:10px;background:linear-gradient(#e9e4dd,#cfc8be)}
+  .sw span{font-size:11.5px;color:var(--muted);text-align:center;line-height:1.2}
+  .sw.active{border-color:var(--accent);background:rgba(124,156,255,.08)}
+  .sw.active span{color:var(--text)}
+  .ctl{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+  .ctl label{display:flex;justify-content:space-between;font-size:13px}
+  .ctl label b{font-weight:500;color:var(--muted)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .toggle{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;gap:10px}
+  .toggle input[type=checkbox]{width:36px;height:20px;accent-color:var(--accent);flex:none}
+  .toggle input[type=color]{width:44px;height:26px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer}
+  .upload{border:1px dashed #3a4256;border-radius:10px;padding:10px;text-align:center;color:var(--muted);
+    cursor:pointer;font-size:12.5px;margin-top:10px;display:block}
+  .upload:hover{border-color:var(--accent);color:var(--text)}
+  input[type=file]{display:none}
+  .foot{color:var(--muted);font-size:11.5px;line-height:1.5}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 32 32"><ellipse cx="16" cy="23" rx="15" ry="4" fill="#7c9cff"/><path d="M7 23c0-12 3-17 9-17s9 5 9 17z" fill="#5b7be0"/><path d="M7 23c0-2 .1-3.6.3-5h17.4c.2 1.4.3 3 .3 5z" fill="#1b2550"/></svg>
+    Hat Try-On
+  </div>
+  <div class="status"><span id="fps" class="pill" style="display:none">— fps</span><span id="status" class="pill">Loading model…</span></div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="viewport" id="viewport">
+      <canvas id="out"></canvas>
+      <canvas id="ovl"></canvas>
+      <div class="empty" id="empty">
+        <h2>Try on hats, live</h2>
+        <p>Start your camera for a live preview, or upload a clear photo of your face. Keep your whole head in frame, with some space above it.</p>
+        <div class="row" style="justify-content:center">
+          <button class="primary" id="camBtn2" disabled>Start camera</button>
+          <label class="btn" for="photoIn">Upload photo</label>
+        </div>
+      </div>
+    </div>
+    <div class="stagebar">
+      <div class="row">
+        <button class="primary" id="camBtn" disabled>Start camera</button>
+        <label class="btn" for="photoIn">Upload photo</label>
+        <button id="snapBtn" disabled>Save snapshot</button>
+        <button id="cmpBtn" disabled title="Hold to see the picture without the hat">Hold to compare</button>
+        <label class="btn" for="modelIn" id="modelPick" style="display:none">Load model file (.task)</label>
+      </div>
+      <div class="hint" id="hint">Tip: drag the hat to move it, scroll to resize it.</div>
+    </div>
+  </section>
+
+  <aside>
+    <div>
+      <h3>Hats</h3>
+      <div class="swatches" id="swatches"></div>
+      <label class="upload" for="hatIn">＋ Upload your own hat image (PNG/JPG product photo)</label>
+      <label class="upload" for="glbIn" style="margin-top:6px">＋ Upload a 3D hat model (.glb) — most realistic</label>
+      <div class="toggle" id="colorRow" style="margin-top:8px">Hat colour <input type="color" id="color"></div>
+    </div>
+
+    <div>
+      <h3>Fit <button class="small" id="resetBtn">Reset</button></h3>
+      <div class="ctl"><label>Size <b id="v_size"></b></label><input type="range" id="size" min="0.6" max="1.8" step="0.01"></div>
+      <div class="ctl"><label>Height on head <b id="v_y"></b></label><input type="range" id="y" min="-0.5" max="0.5" step="0.005"></div>
+      <div class="ctl"><label>Left / right <b id="v_x"></b></label><input type="range" id="x" min="-0.4" max="0.4" step="0.005"></div>
+      <div class="ctl"><label>Tilt <b id="v_tilt"></b></label><input type="range" id="tilt" min="-30" max="30" step="0.5"></div>
+      <div class="ctl"><label>Crown height <b id="v_stretch"></b></label><input type="range" id="stretch" min="0.7" max="1.4" step="0.01"></div>
+      <div class="ctl"><label>Tip forward / back <b id="v_curve"></b></label><input type="range" id="curve" min="-25" max="25" step="0.5"></div>
+    </div>
+
+    <div>
+      <h3>Look</h3>
+      <div class="ctl"><label>Brightness <b id="v_bright"></b></label><input type="range" id="bright" min="0.5" max="1.5" step="0.01" value="1"></div>
+      <div class="ctl"><label>Shadow on face <b id="v_shadow"></b></label><input type="range" id="shadow" min="0" max="1" step="0.01" value="0.6"></div>
+    </div>
+
+    <div id="customBox" style="display:none">
+      <h3>Uploaded hat</h3>
+      <div class="toggle">Remove background <input type="checkbox" id="keyBg" checked></div>
+      <div class="ctl"><label>Background tolerance <b id="v_tol"></b></label><input type="range" id="tol" min="5" max="120" step="1" value="38"></div>
+      <div class="ctl"><label>Part behind the head (from bottom) <b id="v_tuck"></b></label><input type="range" id="tuck" min="0" max="0.6" step="0.01" value="0"></div>
+    </div>
+
+    <div>
+      <h3>View</h3>
+      <div class="toggle">Hide the hat's back behind forehead and hair <input type="checkbox" id="occlude" checked></div>
+      <div class="toggle">Show tracking overlay <input type="checkbox" id="debug"></div>
+    </div>
+
+    <div class="foot">
+      Runs fully in your browser. MediaPipe Face Landmarker tracks head position, size and rotation (roll, yaw, pitch); a segmentation model finds face and hair so the far side of the hat goes behind your head. No images leave your device.
+    </div>
+  </aside>
+</main>
+
+<video id="video" playsinline muted style="display:none"></video>
+<input type="file" id="photoIn" accept="image/*">
+<input type="file" id="hatIn" accept="image/*">
+<input type="file" id="glbIn" accept=".glb,model/gltf-binary">
+<input type="file" id="modelIn" accept=".task,application/octet-stream">
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
