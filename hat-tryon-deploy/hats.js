@@ -128,35 +128,14 @@ function build(parts) {
 }
 
 /* ---------- hats ---------- */
-function cowboy(color) {
-  const m = fabric(color, "felt", 8, 4, { bump: 0.6 });
-  const H = 0.52;
-  return build([
-    [crown(H, 0.15, 0.05, creased(H, 0.13, 0.1)), m],
-    [ring((v, th) => { const s2 = Math.sin(th) ** 2; return [1 + v * (0.62 + 0.22 * s2), -0.03 * v - 0.06 * v * (1 - s2) + 0.32 * v * v * s2]; }, null, 16), m],
-    [band(1, 1 - 0.15 * 0.2, 0.004, 0.07, darker(color, 0.3)), null],
-  ]);
-}
-function tophat(color) {
-  const m = fabric(color, "felt", 8, 6, { bump: 0.3, rough: 0.55 });
-  const H = 0.62;
-  return build([
-    [ring(v => {
-      if (v < 0.72) { const k = v / 0.72; return [1 - 0.035 * Math.sin(PI * k) + 0.05 * k, H * k]; }
-      const k = (v - 0.72) / 0.28; return [1.05 * (1 - Math.pow(k, 1.5)), H + 0.012 * Math.sin(Math.min(1, k * 5) * PI / 2)];
-    }, null, 36), m],
-    [ring((v, th) => { const s2 = Math.sin(th) ** 2; return [1 + 0.3 * v, -0.01 * v - 0.02 * v * (1 - s2) + 0.09 * v * v * s2]; }, null, 10), m],
-    [band(1, 1.008, 0.004, 0.1, 0x6e1620), null],
-  ]);
-}
 
 /* fit: defaults for the fit sliders. brim: the hat has parts that can end up behind the head */
 export const HATS = [
   { name: "Beanie",  model: true, url: "models/hats/knit_beanie.glb", snug: 0.97, sides: 1, fitModel: { ref: 0.2, base: 0.15, cref: 0.35 }, fit: { y: -0.13, curve: -12, stretch: 0.72 } },   // "Black Knit Beanie" by Arkify, CC BY 4.0, sketchfab.com. The scan already slouches back ~19°.
-  { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, sides: 0.7, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
+  { name: "Bucket",  model: true, url: "models/hats/bucket_hat.glb", brim: true, drop: 0.15, sides: 0.8, fitModel: { ref: 0.45, base: 0.32, cref: 0.55 }, fit: { size: 0.88, y: 0.07, stretch: 0.8 } },   // deep straight crown: smaller, shorter, higher. "Bucket Hat" by oluwaphemi, CC BY 4.0, sketchfab.com
+  { name: "Flat cap", model: true, url: "models/hats/flat_cap.glb", brim: true, drop: 0.1, sides: 0.6, fitModel: { ref: 0.1, base: 0.06, cref: 0.4 }, fit: { y: -0.04 } },   // "Flat Cap" by Fridge (youssefdarwish01), CC BY 4.0, sketchfab.com
   { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, sides: 0.55, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com
-  { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, sides: 0.45, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
+  { name: "Bowler",  model: true, url: "models/hats/bowler_hat.glb", brim: true, drop: 0.06, sides: 0.35, fitModel: { ref: 0.2, base: 0.12, cref: 0.4 }, fit: { y: 0.04, stretch: 0.85 } },   // "Bowler Hat" by Joycestick (piperno.b), CC BY 4.0, sketchfab.com
   { name: "Straw hat", model: true, url: "models/hats/straw_hat.glb", brim: true, drop: 0.12, sides: 0.6, fitModel: { ref: 0.58, base: 0.48, cref: 0.65 }, fit: { y: 0.24, size: 0.9 } },   // its front and back brim dip ~7 cm below the band: the band sits high so the front clears the eyes   // "Unisex Summer Straw Hat" by arloopa, Sketchfab Standard licence
-  { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, sides: 0.6, fit: {} },
-  { name: "Top hat", color: "#1d1d22", make: tophat,  brim: true, sides: 0.3, fit: {} },
+  { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, sides: 0.45, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
 ];
