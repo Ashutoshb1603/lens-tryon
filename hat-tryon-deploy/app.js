@@ -70,7 +70,7 @@ function maskAware(mat, shadow, opaque) {
     Object.assign(sh.uniforms, MU);
     sh.vertexShader = "uniform float uCrown; varying float vVz; varying float vHy; varying vec3 vP;\n" + (shadow ? sh.vertexShader : sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n if (transformed.y > 0.) transformed.y *= uCrown;")).replace("#include <project_vertex>", "#include <project_vertex>\n vVz = -mvPosition.z; vHy = position.y; vP = position;");
     sh.fragmentShader = MASK_GLSL + (shadow
-      ? sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n float sd = 1. - smoothstep(0., uLen, uRim + uSlope * vP.z + uSide * vP.x - vP.y); gl_FragColor.a *= mix(1., personMask(), uMaskOn) * pow(sd, 1.15) * smoothstep(-.1, .25, vP.z);")
+      ? sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n float sd = 1. - smoothstep(0., uLen, uRim + uSlope * vP.z + uSide * vP.x - vP.y); gl_FragColor.a *= mix(1., personMask(), uMaskOn) * pow(sd, 1.15) * smoothstep(-.8, -.35, vP.z);   // front and sides (ears, side hair), not the back")
       : (opaque ? sh.fragmentShader.replace("#include <alphatest_fragment>", "diffuseColor.a = 1.;\n#include <alphatest_fragment>") : sh.fragmentShader).replace("#include <dithering_fragment>", "#include <dithering_fragment>\n gl_FragColor.rgb *= mix(.74, 1.06, smoothstep(-.02, .5, vP.y));\n gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy + uSeed, vec2(12.9898, 78.233))) * 43758.5453) - .5) * uGrain;\n gl_FragColor.a *= 1. - uMaskOn * personMask() * smoothstep(0., uSoft, vVz - uHeadVz) * (1. - smoothstep(.1, .2, vHy));\n if (gl_FragColor.a < .02) discard;"));
   };
   mat.customProgramCacheKey = () => shadow ? "shade" : opaque ? "hat-opaque" : "hat";
@@ -128,14 +128,16 @@ const TILT_BACK = 9 * Math.PI / 180;   // a hat sits lower at the back of the he
 /* How far the hat's top may face away from (under) or towards (over) the camera. Webcams usually sit below the eyes,
    and head pitch from one camera is the least reliable angle: at full strength the brim's far side swings down past
    the face like a lampshade. Limiting the view of the hat keeps it on the head; the band stays on the forehead. */
-const VIEW_UNDER = Math.sin(12 * Math.PI / 180), VIEW_OVER = Math.sin(28 * Math.PI / 180);
+/* Soft limits: past the knee the hat still follows the head, more and more stiffly, up to the limit. */
+const VIEW_UNDER = Math.sin(22 * Math.PI / 180), VIEW_OVER = Math.sin(32 * Math.PI / 180), KNEE_UNDER = Math.sin(11 * Math.PI / 180), KNEE_OVER = Math.sin(20 * Math.PI / 180);
+const soft = (v, knee, lim) => v <= knee ? v : knee + (lim - knee) * Math.tanh((v - knee) / (lim - knee));
 const _hy = new THREE.Vector3(), _hz = new THREE.Vector3();
 /* tilt back (radians, about the head's x axis) that keeps the hat's up axis within the limits, as close to t0 as possible */
 function viewTilt(t0) {
   _hy.set(0, 1, 0).applyQuaternion(headG.quaternion); _hz.set(0, 0, 1).applyQuaternion(headG.quaternion);
   const g = t => Math.cos(t) * _hy.z - Math.sin(t) * _hz.z;   // z of the hat's up axis: + top seen, - underside seen
-  const v = g(t0), goal = Math.min(VIEW_OVER, Math.max(-VIEW_UNDER, v));
-  if (goal === v) return t0;
+  const v = g(t0), goal = v >= 0 ? soft(v, KNEE_OVER, VIEW_OVER) : -soft(-v, KNEE_UNDER, VIEW_UNDER);
+  if (Math.abs(goal - v) < 1e-5) return t0;
   const R = Math.hypot(_hy.z, _hz.z), phi = Math.atan2(_hz.z, _hy.z);
   if (R < 1e-6 || Math.abs(goal) > R) return t0;
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a)), c = Math.acos(goal / R);
@@ -423,8 +425,11 @@ function headPose(lm, mat, W, H, t, useFilter) {
   let q = Q.toArray();
   if (useFilter) {
     cx = filt.cx.f(cx, t); cy = filt.cy.f(cy, t); w = filt.w.f(w, t);
-    yaw = filt.yaw.f(yaw, t); pitch = filt.pitch.f(pitch, t); roll = filt.roll.f(roll, t); h = filt.h.f(h, t);
-    fz = filt.fz.f(fz, t);
+    yaw = filt.yaw.f(yaw, t); pitch = filt.pitch.f(pitch, t); roll = filt.roll.f(roll, t);
+    // forehead height and depth belong to the person, not the pose; the tracker's depth makes them drift when the head
+    // nods or turns, which bobbed the hat up and down. Learn them while the face is near frontal, hold them otherwise.
+    const frontal = Math.abs(pitch) < 0.22 && Math.abs(yaw) < 0.35;
+    if (frontal || filt.h.x === null) { h = filt.h.f(h, t); fz = filt.fz.f(fz, t); } else { h = filt.h.x; fz = filt.fz.x; filt.h.t = filt.fz.t = t; }
     if (lastQ && q[0] * lastQ[0] + q[1] * lastQ[1] + q[2] * lastQ[2] + q[3] * lastQ[3] < 0) q = q.map(v => -v);
     q = q.map((v, i) => filt["q" + i].f(v, t)); const l = Math.hypot(...q) || 1; q = q.map(v => v / l); lastQ = q;
   }
@@ -483,6 +488,9 @@ function render(source, W, H, pose) {
     // head shape: front at the forehead, top a little above the hairline
     const zc = pose.fz - HEAD_R[2] * 0.97, top = pose.h + 0.3;
     for (const m of [occluder, catcher, wire]) { m.scale.set(HEAD_R[0], HEAD_R[1], HEAD_R[2]); m.position.set(0, top - HEAD_R[1], zc); }
+    // the shadow shell is as wide as the hat band, so it reaches the ears and the hair at the sides (the person mask trims it)
+    const bandX = A * hairScale * F.size * (hat.snug || 1);
+    catcher.scale.x = Math.max(HEAD_R[0], bandX * 1.02);
     occluder.visible = S.occlude; wire.visible = S.debug;
     if (hat.group.parent !== hatPivot) { hatPivot.clear(); hatPivot.add(hat.group); }
     const tb0 = TILT_BACK + F.curve * Math.PI / 180, tb = viewTilt(tb0);
@@ -594,7 +602,7 @@ async function setMode(m) {
   mode = m;
 }
 /* face + hair masks for one frame; only needed when the hat has a part that goes behind the head */
-const needMask = () => !!segmenter && S.occlude && !!(hat.brim || hat.custom);
+const needMask = () => !!segmenter && ((S.occlude && !!(hat.brim || hat.custom)) || S.shadow > 0);   // the shadow also needs it: only the person takes it
 let segTick = 0;
 function segment(source, t) {
   let seg = null;

@@ -216,9 +216,7 @@ function tophat(color) {
 export const HATS = [
   { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
   { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, fit: { y: -0.06 } },   // pulled down to mid-forehead
-  { name: "Bobble",  color: "#2b4b7c", make: c => beanie(c, true), crownTop: 0.6, snug: 0.96, fit: { y: -0.06 } },
   { name: "Cap",     color: "#1f3557", make: cap,     brim: true, drop: 0.13, snug: 0.98, fit: {} },
-  { name: "Bucket",  color: "#7a8450", make: bucket,  brim: true, drop: 0.2, fit: { y: 0.035 } },   // sits a little higher so the eyes stay visible
   { name: "Fedora",  color: "#6a4a34", make: fedora,  brim: true, drop: 0.06, crownTop: 0.47, fit: {} },
   { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, fit: {} },
   { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, fit: {} },
