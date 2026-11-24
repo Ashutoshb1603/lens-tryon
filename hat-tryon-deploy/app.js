@@ -457,7 +457,8 @@ function hairFit(seg, pose, W, H, smooth) {
     while (r > 0 && !on(r, b)) r -= 0.02;
     if (l + r > 0.6) { sum += (l + r) / 2; n++; }
   }
-  const t = n ? Math.min(1.45, Math.max(1.1, sum / n * 1.08 / A)) : HAT_SCALE;
+  // band = the head (hair included) where the hat sits, plus a little room; no floor above that, or slim heads show a gap
+  const t = n ? Math.min(1.45, Math.max(0.98, sum / n * 1.04 / A)) : HAT_SCALE;
   hairScale = smooth ? hairScale + (t - hairScale) * 0.15 : t;
   let top = pose.h; while (top < pose.h + 0.9 && (on(0, top + 0.02) || on(-0.12, top + 0.02) || on(0.12, top + 0.02))) top += 0.02;
   const y = (pose.cy - w * top * cr) / H;   // hair cut off by the picture edge tells nothing
@@ -492,7 +493,8 @@ function render(source, W, H, pose) {
     hatPivot.rotation.set(-tb, 0, -F.tilt * Math.PI / 180); // crown tall enough to hold the hair
     let cs = 1;
     if (!hat.custom && !hat.model) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, ((pose.h + 0.3) * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
-    hatPivot.scale.set(F.size * hairScale, F.size * hairScale * F.stretch, F.size * hairScale); MU.uCrown.value = cs;
+    const sn = hat.snug || 1;   // knits and caps stretch over the head; felt and straw hats sit a little proud of it
+    hatPivot.scale.set(F.size * hairScale * sn, F.size * hairScale * F.stretch, F.size * hairScale * sn); MU.uCrown.value = cs;
     // light
     estimateLight(source, pose, !!stream);
     MU.uGrain.value = light.grain; MU.uSeed.value = stream ? (MU.uSeed.value + 17.3) % 1000 : 0;

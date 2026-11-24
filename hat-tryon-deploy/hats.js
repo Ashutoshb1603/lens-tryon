@@ -130,14 +130,19 @@ function build(parts) {
 /* ---------- hats ---------- */
 function beanie(color, bobble) {
   const body = fabric(color, "knit", 34, 5), cuff = fabric(color, "knit", 30, 2);
+  /* A knit hugs the skull. Its edge is not a flat ring: it dips over the tops of the ears at the sides (SIDE),
+     the cuff is thin and turned in at the bottom, and a little slack gathers at the back of the crown. */
+  const SIDE = 0.13, dip = (th, k = 1) => SIDE * Math.pow(Math.sin(th), 2) * k;
   const parts = [
-    [ring(v => { const a = v * PI / 2; return [Math.pow(Math.cos(a), 0.6), 0.1 + 0.5 * Math.sin(a)]; }, (p, th, v) => { p[2] -= 0.05 * v * v; }, 32), body],
-    [ring(v => [1 + 0.05 * Math.pow(Math.sin(PI * v), 0.4), -0.03 + 0.2 * v], null, 12), cuff],
+    [ring(v => { const a = v * PI / 2; return [Math.pow(Math.cos(a), 0.75) * (1 - 0.03 * v), 0.1 + 0.5 * Math.sin(a)]; },
+      (p, th, v) => { p[1] -= dip(th, (1 - v) * (1 - v)); const back = Math.max(0, -Math.cos(th)); p[2] -= 0.07 * back * Math.sin(PI * v); p[1] += 0.025 * back * v; }, 32), body],
+    [ring(v => [0.985 + 0.03 * Math.pow(Math.sin(PI * (0.25 + 0.75 * v)), 0.5) - 0.025 * (1 - v) * (1 - v), -0.04 + 0.17 * v],
+      (p, th) => { p[1] -= dip(th); }, 12), cuff],
   ];
   if (bobble) {
     const g = new THREE.SphereGeometry(0.13, 32, 24), p = g.attributes.position;
     for (let i = 0; i < p.count; i++) { const k = 1 + (Math.random() - 0.5) * 0.14; p.setXYZ(i, p.getX(i) * k, p.getY(i) * k, p.getZ(i) * k); }
-    g.computeVertexNormals(); g.translate(0, 0.68, -0.05);
+    g.computeVertexNormals(); g.translate(0, 0.68, -0.06);
     parts.push([g, new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 1 }), false]);
   }
   return build(parts);
@@ -210,9 +215,9 @@ function tophat(color) {
 /* fit: defaults for the fit sliders. brim: the hat has parts that can end up behind the head */
 export const HATS = [
   { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
-  { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), fit: { y: -0.02 } },
-  { name: "Bobble",  color: "#2b4b7c", make: c => beanie(c, true), crownTop: 0.6,  fit: { y: -0.02 } },
-  { name: "Cap",     color: "#1f3557", make: cap,     brim: true, drop: 0.13, fit: {} },
+  { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, fit: { y: -0.06 } },   // pulled down to mid-forehead
+  { name: "Bobble",  color: "#2b4b7c", make: c => beanie(c, true), crownTop: 0.6, snug: 0.96, fit: { y: -0.06 } },
+  { name: "Cap",     color: "#1f3557", make: cap,     brim: true, drop: 0.13, snug: 0.98, fit: {} },
   { name: "Bucket",  color: "#7a8450", make: bucket,  brim: true, drop: 0.2, fit: { y: 0.035 } },   // sits a little higher so the eyes stay visible
   { name: "Fedora",  color: "#6a4a34", make: fedora,  brim: true, drop: 0.06, crownTop: 0.47, fit: {} },
   { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, fit: {} },
