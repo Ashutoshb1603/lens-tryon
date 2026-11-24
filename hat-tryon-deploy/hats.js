@@ -182,7 +182,7 @@ function tophat(color) {
 
 /* fit: defaults for the fit sliders. brim: the hat has parts that can end up behind the head */
 export const HATS = [
-  { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, sides: 0.95, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
+  { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, stretchCrown: true, sides: 0.8, fitModel: { ref: 0.33, base: 0.28, cref: 0.45 }, fit: { y: 0.06, curve: 3 } },   // scanned lying flat: crown too shallow, so it is stretched to the hair   // photo-scanned hat, CC0, polyhaven.com
   { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, sides: 1, fit: { y: -0.06 } },   // pulled down to mid-forehead
   { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, sides: 0.7, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
   { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, sides: 0.55, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com

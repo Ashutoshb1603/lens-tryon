@@ -504,7 +504,7 @@ function render(source, W, H, pose) {
     hatPivot.position.y += zf * (Math.sin(tb0) - Math.sin(tb)); hatPivot.position.z += zf * (Math.cos(tb0) - Math.cos(tb));
     hatPivot.rotation.set(-tb, 0, -F.tilt * Math.PI / 180); // crown tall enough to hold the hair
     let cs = 1;
-    if (!hat.custom && !hat.model) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, ((pose.h + 0.3) * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
+    if (!hat.custom && (!hat.model || hat.stretchCrown)) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, ((pose.h + 0.3) * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
     const sn = hat.snug || 1;   // knits and caps stretch over the head; felt and straw hats sit a little proud of it
     hatPivot.scale.set(F.size * hairScale * sn, F.size * hairScale * F.stretch, F.size * hairScale * sn); MU.uCrown.value = cs;
     /* A hat band is not level on a head: it crosses the mid-forehead in front but comes down to the tops of the ears at
