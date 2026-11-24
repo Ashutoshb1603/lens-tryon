@@ -447,7 +447,7 @@ function setMask(seg) {
   MU.uMaskOn.value = seg ? 1 : 0; if (!seg) return;
   const n = seg.w * seg.h;
   if (!maskBuf || maskBuf.length !== n) { maskBuf = new Uint8Array(n); maskTex.dispose(); maskTex.image = { data: maskBuf, width: seg.w, height: seg.h }; }
-  for (let i = 0; i < n; i++) maskBuf[i] = Math.min(255, (seg.hair[i] + seg.face[i]) * 255);
+  for (let i = 0; i < n; i++) maskBuf[i] = Math.min(255, (seg.hair[i] + seg.face[i] + (seg.skin ? seg.skin[i] : 0)) * 255);   // the person: hair, face, ears (and neck)
   maskTex.needsUpdate = true;
 }
 
@@ -510,7 +510,7 @@ function render(source, W, H, pose) {
     /* A hat band is not level on a head: it crosses the mid-forehead in front but comes down to the tops of the ears at
        the sides, where the head curves away. Bend the lower edge down at the sides to the tops of the ears, fully for
        soft hats (hat.sides = 1), less for stiff ones; without it there is open space between the hat and the ears. */
-    const earTop = pose.brow - 0.18;   // tops of the ears, below the eyebrows (the tracker's 'ear' points are at eye level)
+    const earTop = pose.brow - 0.1;   // tops of the ears, a little below the eyebrows: lower and the hat cuts into the ears, higher and it leaves a gap
     const sideGap = Math.max(0, hatPivot.position.y - earTop);
     const sideDrop = Math.min(0.3, sideGap * (hat.sides ?? 0.5));
     MU.uSideDrop.value = sideDrop / (F.size * hairScale * F.stretch); MU.uSideDropS.value = sideDrop / HEAD_R[1];   // the shadow line bends with it
@@ -619,7 +619,8 @@ function segment(source, t) {
   let seg = null;
   const cb = r => {
     const m = r.confidenceMasks; if (!m || m.length < 4) return;
-    seg = { hair: m[1].getAsFloat32Array().slice(), face: m[3].getAsFloat32Array().slice(), w: m[1].width, h: m[1].height };
+    // ears are labelled body skin (class 2), not face skin: keep them, or the hat behind the head is drawn over them
+    seg = { hair: m[1].getAsFloat32Array().slice(), face: m[3].getAsFloat32Array().slice(), skin: m[2].getAsFloat32Array().slice(), w: m[1].width, h: m[1].height };
   };
   try { if (mode === "VIDEO") segmenter.segmentForVideo(source, t, cb); else segmenter.segment(source, cb); }
   catch (e) { console.warn("Segmentation failed, switching it off:", e); segmenter = null; }
