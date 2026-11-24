@@ -147,8 +147,10 @@ function viewTilt(t0) {
 }
 function disposeGroup(g) { g.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.bumpMap?.dispose(); o.material.dispose(); } }); }
 /* A 3D hat file (glTF/GLB) is brought into head widths: its crown, measured above any brim, is scaled to the head band,
-   centred, and set down so the band is at y = 0. Assumes y up and the front towards +z, as glTF asks. */
-function fitModel(obj) {
+   centred, and set down so the band is at y = 0. Assumes y up and the front towards +z, as glTF asks.
+   o.ref / o.base / o.cref (fractions of the model's height, from the bottom) override where the head band is measured,
+   where it sits and where the crown is centred: for crowns that bulge out above the band (peaked caps) or visors that stick forward instead of out. */
+function fitModel(obj, o = {}) {
   obj.updateMatrixWorld(true);
   const pts = [], v = new THREE.Vector3();
   obj.traverse(o => { if (!o.isMesh || o.isSkinnedMesh) return; const p = o.geometry.attributes.position, st = Math.max(1, Math.floor(p.count / 20000)); for (let i = 0; i < p.count; i += st) { v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); pts.push(v.x, v.y, v.z); } });
@@ -160,9 +162,10 @@ function fitModel(obj) {
   // brim: the lowest slices much wider than the crown; the band is where they end
   let band = 0; for (let i = 0; i < N * 0.5; i++) if (wd[i] > cw * 1.3) band = i + 1;
   let ri = Math.min(N - 1, Math.max(band + 1, Math.floor(N * 0.4))); for (let d = 0; d < N && !isFinite(wd[ri]); d++) for (const j of [ri + d, ri - d]) if (isFinite(wd[j])) { ri = j; break; }   // low-poly: nearest slice that has vertices
-  const ref = sl[ri], k = 2 * A * 1.03 / cw;
+  if (o.ref !== undefined) { ri = Math.min(N - 1, Math.max(0, Math.floor(o.ref * N))); for (let d = 0; d < N && !isFinite(wd[ri]); d++) if (isFinite(wd[ri + 1])) ri++; }
+  const ref = sl[o.cref !== undefined ? Math.min(N - 1, Math.floor(o.cref * N)) : ri], k = 2 * A * 1.03 / (o.ref !== undefined ? wd[ri] : cw);   // o.cref: centre front-to-back from a slice above a visor
   // bake the placement into the vertices, so the hat shaders see head widths like the built-in hats
-  const g = new THREE.Group(), M = new THREE.Matrix4(), P = new THREE.Matrix4().makeScale(k, k, k).setPosition(-(ref[0] + ref[1]) / 2 * k, -(y0 + (band ? (band - 0.5) / N : 0.1) * Hh) * k, -(ref[2] + ref[3]) / 2 * k);
+  const g = new THREE.Group(), M = new THREE.Matrix4(), P = new THREE.Matrix4().makeScale(k, k, k).setPosition(-(ref[0] + ref[1]) / 2 * k, -(y0 + (o.base !== undefined ? o.base : band ? (band - 0.5) / N : 0.1) * Hh) * k, -(ref[2] + ref[3]) / 2 * k);
   obj.traverse(o => {
     if (!o.isMesh || o.isSkinnedMesh) return;
     const geo = o.geometry.clone(), p = geo.attributes.position;
@@ -176,7 +179,7 @@ const gltf = new GLTFLoader();
 const sealed = new THREE.LoadingManager(); sealed.setURLModifier(u => /^(data|blob):/i.test(u) ? u : "data:,");
 const gltfUpload = new GLTFLoader(sealed);
 function adoptModel(h, scene3) {
-  const f = fitModel(scene3); if (!f) throw new Error("no meshes in the file");
+  const f = fitModel(scene3, h.fitModel); if (!f) throw new Error("no meshes in the file");
   h.group = f.group; h.top = f.top; if (h.brim === undefined) h.brim = f.brim;
   const seen = new Set();   // meshes may share a material
   h.group.traverse(o => { if (o.isMesh) { for (const m of [].concat(o.material)) { if (seen.has(m)) continue; seen.add(m); m.side = THREE.DoubleSide; maskAware(m, false, !m.transparent && !m.alphaTest); } } });

@@ -147,38 +147,6 @@ function beanie(color, bobble) {
   }
   return build(parts);
 }
-function cap(color) {
-  const m = fabric(color, "panel", 6, 1, { bump: 0.8 }), vm = fabric(color, "stitched", 1, 1, { bump: 0.8 });
-  const dome = ring(v => { const a = v * PI / 2; return [Math.pow(Math.cos(a), 0.5), 0.44 * Math.sin(a)]; },
-    (p, th, v) => { p[2] += 0.05 * Math.sin(PI * v) * Math.max(0, Math.cos(th)); }, 32);
-  const visor = surf((u, v) => {
-    const s = u * 2 - 1, th = s * 0.8, L = 0.55 * Math.pow(Math.cos(s * PI / 2), 0.6);
-    const d = Math.hypot(0.5 * Math.sin(th), 1);
-    return [A * Math.sin(th) + 0.5 * Math.sin(th) / d * L * v, 0.012 - 0.5 * v * L - 0.03 * s * s * v, B * Math.cos(th) + L * v / d];
-  }, 48, 10, false);
-  const button = new THREE.SphereGeometry(0.035, 16, 12); button.scale(1, 0.5, 1); button.translate(0, 0.44, 0);
-  return build([[dome, m], [visor, vm], [button, vm]]);
-}
-function bucket(color) {
-  const m = fabric(color, "cotton", 10, 3), bm = fabric(color, "stitched", 10, 1);
-  return build([
-    [ring(v => {
-      if (v < 0.6) { const k = v / 0.6; return [1 - 0.1 * k, 0.34 * k]; }
-      const k = (v - 0.6) / 0.4; return [0.9 * (1 - k * k), 0.34 + 0.035 * Math.sin(Math.min(1, k * 3) * PI / 2)];
-    }, null, 30), m],
-    [ring((v, th) => [1 + 0.42 * v, -0.2 * Math.pow(v, 1.15) + 0.012 * Math.sin(3 * th + 1) * v], null, 12), bm],
-  ]);
-}
-function fedora(color) {
-  const m = fabric(color, "felt", 8, 4, { bump: 0.6 });
-  const H = 0.44;
-  return build([
-    [crown(H, 0.22, 0.07, creased(H + 0.04, 0.085, 0.08), 0.6, 0.9), m],
-    // brim dips a little in front and its edge rolls up, most at the sides and back
-    [ring((v, th) => { const c = Math.cos(th), e = sm(0.3, 1, v); return [1 + 0.44 * v - 0.03 * e * e, -0.02 * v - 0.05 * v * Math.max(0, c) + e * e * (0.055 + 0.035 * Math.sin(th) ** 2 + 0.03 * Math.max(0, -c))]; }, null, 20), m],
-    [band(1, 1 - 0.22 * 0.3, 0.004, 0.125, darker(color, 0.28)), null],
-  ]);
-}
 function sunhat(color) {
   const m = fabric(color, "straw", 26, 6, { bump: 1.6, rough: 0.8 });
   return build([
@@ -216,8 +184,9 @@ function tophat(color) {
 export const HATS = [
   { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
   { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, fit: { y: -0.06 } },   // pulled down to mid-forehead
-  { name: "Cap",     color: "#1f3557", make: cap,     brim: true, drop: 0.13, snug: 0.98, fit: {} },
-  { name: "Fedora",  color: "#6a4a34", make: fedora,  brim: true, drop: 0.06, crownTop: 0.47, fit: {} },
+  { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
+  { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com
+  { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
   { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, fit: {} },
   { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, fit: {} },
   { name: "Top hat", color: "#1d1d22", make: tophat,  brim: true, fit: {} },
