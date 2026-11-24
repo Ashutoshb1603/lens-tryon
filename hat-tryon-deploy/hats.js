@@ -128,17 +128,6 @@ function build(parts) {
 }
 
 /* ---------- hats ---------- */
-function sunhat(color) {
-  const m = fabric(color, "straw", 26, 6, { bump: 1.6, rough: 0.8 });
-  return build([
-    [ring(v => {
-      if (v < 0.5) { const k = v / 0.5; return [1 - 0.06 * k, 0.3 * k]; }
-      const a = (v - 0.5) / 0.5 * PI / 2; return [0.94 * Math.pow(Math.cos(a), 0.8), 0.3 + 0.1 * Math.sin(a)];
-    }, null, 30), m],
-    [ring((v, th) => [1 + 1.05 * v, -0.03 * v - 0.16 * Math.pow(v, 2.2) + 0.02 * Math.sin(3 * th) * v * v], null, 20), m],
-    [band(1, 0.985, 0.004, 0.1, 0x2b3a55), null],
-  ]);
-}
 function cowboy(color) {
   const m = fabric(color, "felt", 8, 4, { bump: 0.6 });
   const H = 0.52;
@@ -167,7 +156,6 @@ export const HATS = [
   { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, sides: 0.7, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
   { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, sides: 0.55, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com
   { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, sides: 0.45, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
-  { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, sides: 0.8, fit: {} },
   { name: "Straw hat", model: true, url: "models/hats/straw_hat.glb", brim: true, drop: 0.12, sides: 0.6, fitModel: { ref: 0.58, base: 0.48, cref: 0.65 }, fit: { y: 0.24, size: 0.9 } },   // its front and back brim dip ~7 cm below the band: the band sits high so the front clears the eyes   // "Unisex Summer Straw Hat" by arloopa, Sketchfab Standard licence
   { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, sides: 0.6, fit: {} },
   { name: "Top hat", color: "#1d1d22", make: tophat,  brim: true, sides: 0.3, fit: {} },
