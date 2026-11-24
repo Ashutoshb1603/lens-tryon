@@ -60,17 +60,17 @@ const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(0, 1, 1, 0, 
 let bgTex = null, bgKey = "";
 const maskTex = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
 maskTex.minFilter = maskTex.magFilter = THREE.LinearFilter; maskTex.needsUpdate = true;
-const MU = { uMask: { value: maskTex }, uMaskOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uHeadVz: { value: 0 }, uSoft: { value: 1 }, uRim: { value: 0 }, uSlope: { value: 0 }, uLen: { value: 0.3 }, uSide: { value: 0 }, uCrown: { value: 1 }, uGrain: { value: 0.02 }, uSeed: { value: 0 } };
-const MASK_GLSL = "uniform sampler2D uMask; uniform float uMaskOn; uniform vec2 uRes; uniform float uHeadVz; uniform float uSoft; uniform float uRim; uniform float uSlope; uniform float uLen; uniform float uSide; uniform float uGrain; uniform float uSeed; varying float vVz; varying float vHy; varying vec3 vP;\n" +
+const MU = { uMask: { value: maskTex }, uMaskOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uHeadVz: { value: 0 }, uSoft: { value: 1 }, uRim: { value: 0 }, uSlope: { value: 0 }, uLen: { value: 0.3 }, uSide: { value: 0 }, uCrown: { value: 1 }, uSideDrop: { value: 0 }, uSideDropS: { value: 0 }, uGrain: { value: 0.02 }, uSeed: { value: 0 } };
+const MASK_GLSL = "uniform float uSideDropS; uniform sampler2D uMask; uniform float uMaskOn; uniform vec2 uRes; uniform float uHeadVz; uniform float uSoft; uniform float uRim; uniform float uSlope; uniform float uLen; uniform float uSide; uniform float uGrain; uniform float uSeed; varying float vVz; varying float vHy; varying vec3 vP;\n" +
   "float personMask(){ return smoothstep(.3, .7, texture2D(uMask, vec2(gl_FragCoord.x / uRes.x, 1. - gl_FragCoord.y / uRes.y)).r); }\n";
 /* Hat materials: the low parts of the hat (brim) that lie behind the head are hidden where the picture shows hair or
    face. Shadow material: the shadow is only drawn on the person. */
 function maskAware(mat, shadow, opaque) {
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, MU);
-    sh.vertexShader = "uniform float uCrown; varying float vVz; varying float vHy; varying vec3 vP;\n" + (shadow ? sh.vertexShader : sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n if (transformed.y > 0.) transformed.y *= uCrown;")).replace("#include <project_vertex>", "#include <project_vertex>\n vVz = -mvPosition.z; vHy = position.y; vP = position;");
+    sh.vertexShader = "uniform float uCrown; uniform float uSideDrop; varying float vVz; varying float vHy; varying vec3 vP;\n" + (shadow ? sh.vertexShader : sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n { float ax = transformed.x / 0.57, bz = transformed.z / 0.68; float sd = ax * ax / max(1e-4, ax * ax + bz * bz); transformed.y -= uSideDrop * sd * (1. - smoothstep(0., .45, transformed.y)); }\n if (transformed.y > 0.) transformed.y *= uCrown;")).replace("#include <project_vertex>", "#include <project_vertex>\n vVz = -mvPosition.z; vHy = position.y; vP = position;");
     sh.fragmentShader = MASK_GLSL + (shadow
-      ? sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n float sd = 1. - smoothstep(0., uLen, uRim + uSlope * vP.z + uSide * vP.x - vP.y); gl_FragColor.a *= mix(1., personMask(), uMaskOn) * pow(sd, 1.15) * smoothstep(-.8, -.35, vP.z);   // front and sides (ears, side hair), not the back")
+      ? sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n float sd = 1. - smoothstep(0., uLen, uRim + uSlope * vP.z + uSide * vP.x - uSideDropS * vP.x * vP.x / max(1e-4, vP.x * vP.x + vP.z * vP.z) - vP.y); gl_FragColor.a *= mix(1., personMask(), uMaskOn) * pow(sd, 1.15) * smoothstep(-.8, -.35, vP.z);   // front and sides (ears, side hair), not the back")
       : (opaque ? sh.fragmentShader.replace("#include <alphatest_fragment>", "diffuseColor.a = 1.;\n#include <alphatest_fragment>") : sh.fragmentShader).replace("#include <dithering_fragment>", "#include <dithering_fragment>\n gl_FragColor.rgb *= mix(.74, 1.06, smoothstep(-.02, .5, vP.y));\n gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy + uSeed, vec2(12.9898, 78.233))) * 43758.5453) - .5) * uGrain;\n gl_FragColor.a *= 1. - uMaskOn * personMask() * smoothstep(0., uSoft, vVz - uHeadVz) * (1. - smoothstep(.1, .2, vHy));\n if (gl_FragColor.a < .02) discard;"));
   };
   mat.customProgramCacheKey = () => shadow ? "shade" : opaque ? "hat-opaque" : "hat";
@@ -390,7 +390,7 @@ class OneEuro {
 }
 /* position in pixels, angles in radians, sizes in pixels / head widths */
 const filt = { cx: new OneEuro(1.2, 0.25, 1), cy: new OneEuro(1.2, 0.25, 1), w: new OneEuro(0.6, 0.05, 1),
-  yaw: new OneEuro(1, 6, 1), pitch: new OneEuro(1, 6, 1), roll: new OneEuro(1.2, 8, 1), h: new OneEuro(0.25, 0.5, 1), fz: new OneEuro(0.25, 0.5, 1),
+  yaw: new OneEuro(1, 6, 1), pitch: new OneEuro(1, 6, 1), roll: new OneEuro(1.2, 8, 1), h: new OneEuro(0.25, 0.5, 1), fz: new OneEuro(0.25, 0.5, 1), brow: new OneEuro(0.25, 0.5, 1),
   q0: new OneEuro(1, 6, 1), q1: new OneEuro(1, 6, 1), q2: new OneEuro(1, 6, 1), q3: new OneEuro(1, 6, 1) };
 let lastQ = null;
 const resetFilters = () => { Object.values(filt).forEach(f => f.reset()); lastQ = null; };
@@ -417,6 +417,7 @@ function headPose(lm, mat, W, H, t, useFilter) {
   let w = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
   let h = dot(sub(T, C), hy) / w, cx = C[0], cy = C[1];
   let fz = Math.min(0.62, Math.max(0.4, dot(sub(T, C), hz) / w));        // forehead in front of the ear line
+  const Br = P(105), Bl = P(334); let brow = dot(sub([(Br[0] + Bl[0]) / 2, (Br[1] + Bl[1]) / 2, (Br[2] + Bl[2]) / 2], C), hy) / w;   // eyebrows: about the height of the tops of the ears
   // rotation in world axes (y up). The tracker's matrix is relative to the camera axis; turn it to how the head looks
   // from where it is in the frame, since the scene is drawn without perspective.
   const X = norm(cross([hy[0], -hy[1], hy[2]], [hz[0], -hz[1], hz[2]])), Y = [hy[0], -hy[1], hy[2]], Z = cross(X, Y);
@@ -432,11 +433,11 @@ function headPose(lm, mat, W, H, t, useFilter) {
     // forehead height and depth belong to the person, not the pose; the tracker's depth makes them drift when the head
     // nods or turns, which bobbed the hat up and down. Learn them while the face is near frontal, hold them otherwise.
     const frontal = Math.abs(pitch) < 0.22 && Math.abs(yaw) < 0.35;
-    if (frontal || filt.h.x === null) { h = filt.h.f(h, t); fz = filt.fz.f(fz, t); } else { h = filt.h.x; fz = filt.fz.x; filt.h.t = filt.fz.t = t; }
+    if (frontal || filt.h.x === null) { h = filt.h.f(h, t); fz = filt.fz.f(fz, t); brow = filt.brow.f(brow, t); } else { h = filt.h.x; fz = filt.fz.x; brow = filt.brow.x; filt.h.t = filt.fz.t = filt.brow.t = t; }
     if (lastQ && q[0] * lastQ[0] + q[1] * lastQ[1] + q[2] * lastQ[2] + q[3] * lastQ[3] < 0) q = q.map(v => -v);
     q = q.map((v, i) => filt["q" + i].f(v, t)); const l = Math.hypot(...q) || 1; q = q.map(v => v / l); lastQ = q;
   }
-  return { cx, cy, w, yaw, pitch, roll, h, fz, q, lm };
+  return { cx, cy, w, yaw, pitch, roll, h, fz, brow, q, lm };
 }
 
 /* ---------------- Person mask (face + hair) ---------------- */
@@ -506,6 +507,13 @@ function render(source, W, H, pose) {
     if (!hat.custom && !hat.model) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, ((pose.h + 0.3) * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
     const sn = hat.snug || 1;   // knits and caps stretch over the head; felt and straw hats sit a little proud of it
     hatPivot.scale.set(F.size * hairScale * sn, F.size * hairScale * F.stretch, F.size * hairScale * sn); MU.uCrown.value = cs;
+    /* A hat band is not level on a head: it crosses the mid-forehead in front but comes down to the tops of the ears at
+       the sides, where the head curves away. Bend the lower edge down at the sides to the tops of the ears, fully for
+       soft hats (hat.sides = 1), less for stiff ones; without it there is open space between the hat and the ears. */
+    const earTop = pose.brow - 0.18;   // tops of the ears, below the eyebrows (the tracker's 'ear' points are at eye level)
+    const sideGap = Math.max(0, hatPivot.position.y - earTop);
+    const sideDrop = Math.min(0.3, sideGap * (hat.sides ?? 0.5));
+    MU.uSideDrop.value = sideDrop / (F.size * hairScale * F.stretch); MU.uSideDropS.value = sideDrop / HEAD_R[1];   // the shadow line bends with it
     // light
     estimateLight(source, pose, !!stream);
     MU.uGrain.value = light.grain; MU.uSeed.value = stream ? (MU.uSeed.value + 17.3) % 1000 : 0;

@@ -132,7 +132,7 @@ function beanie(color, bobble) {
   const body = fabric(color, "knit", 34, 5), cuff = fabric(color, "knit", 30, 2);
   /* A knit hugs the skull. Its edge is not a flat ring: it dips over the tops of the ears at the sides (SIDE),
      the cuff is thin and turned in at the bottom, and a little slack gathers at the back of the crown. */
-  const SIDE = 0.13, dip = (th, k = 1) => SIDE * Math.pow(Math.sin(th), 2) * k;
+  const SIDE = 0.04, dip = (th, k = 1) => SIDE * Math.pow(Math.sin(th), 2) * k;
   const parts = [
     [ring(v => { const a = v * PI / 2; return [Math.pow(Math.cos(a), 0.75) * (1 - 0.03 * v), 0.1 + 0.5 * Math.sin(a)]; },
       (p, th, v) => { p[1] -= dip(th, (1 - v) * (1 - v)); const back = Math.max(0, -Math.cos(th)); p[2] -= 0.07 * back * Math.sin(PI * v); p[1] += 0.025 * back * v; }, 32), body],
@@ -182,12 +182,12 @@ function tophat(color) {
 
 /* fit: defaults for the fit sliders. brim: the hat has parts that can end up behind the head */
 export const HATS = [
-  { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
-  { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, fit: { y: -0.06 } },   // pulled down to mid-forehead
-  { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
-  { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com
-  { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
-  { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, fit: {} },
-  { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, fit: {} },
-  { name: "Top hat", color: "#1d1d22", make: tophat,  brim: true, fit: {} },
+  { name: "Boonie",  model: true, url: "models/hats/fishermans_hat/fishermans_hat_1k.gltf", brim: true, drop: 0.12, sides: 0.95, fit: {} },   // photo-scanned hat, CC0, polyhaven.com
+  { name: "Beanie",  color: "#a8342b", make: c => beanie(c, false), snug: 0.96, sides: 1, fit: { y: -0.06 } },   // pulled down to mid-forehead
+  { name: "Cap",     model: true, url: "models/hats/baseball_cap.glb", brim: true, drop: 0.13, snug: 0.98, fitModel: { ref: 0.1, cref: 0.4, base: 0.02 }, sides: 0.7, fit: { y: -0.05 } },   // "Baseball Cap" by Scott VanArsdale (vanart), CC BY 4.0, sketchfab.com
+  { name: "Fedora",  model: true, url: "models/hats/classic_fedora.glb", brim: true, drop: 0.06, fitModel: { ref: 0.35, base: 0.16, cref: 0.45 }, sides: 0.55, fit: { y: 0.02, curve: 4 } },   // steep snap brim: sit higher, tipped back a touch   // "Classic Fedora Hat" by ghostmachinesing, CC BY 4.0, sketchfab.com
+  { name: "Officer", model: true, url: "models/hats/military_cap.glb", brim: true, drop: 0.1, fitModel: { ref: 0.15, cref: 0.3, base: 0.04 }, sides: 0.45, fit: { y: -0.04 } },   // "Military Hat" by aSocialCrab, CC BY 4.0, sketchfab.com
+  { name: "Sun hat", color: "#d9bd86", make: sunhat,  brim: true, drop: 0.12, sides: 0.8, fit: {} },
+  { name: "Cowboy",  color: "#a5733d", make: cowboy,  brim: true, drop: 0.06, crownTop: 0.45, sides: 0.6, fit: {} },
+  { name: "Top hat", color: "#1d1d22", make: tophat,  brim: true, sides: 0.3, fit: {} },
 ];
