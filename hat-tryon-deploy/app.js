@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=e5ab0c6";
+import { HATS, A, B } from "./hats.js?v=83b9fc1";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -459,7 +459,7 @@ function maskFollow(pose) {
 function setMask(seg, pose) {
   MU.uMaskOn.value = seg ? 1 : 0; if (!seg) return;
   if (seg === lastMaskSeg) return;   // same mask as before: only its placement changes (maskFollow)
-  lastMaskSeg = seg; maskPose = pose ? { cx: pose.cx, cy: pose.cy, w: pose.w } : null;
+  lastMaskSeg = seg; pose = seg.pose || pose; maskPose = pose ? { cx: pose.cx, cy: pose.cy, w: pose.w } : null;   // a worker mask carries the pose of its own frame
   const n = seg.w * seg.h;
   if (!maskBuf || maskBuf.length !== n) { maskBuf = new Uint8Array(n); maskTex.dispose(); maskTex.image = { data: maskBuf, width: seg.w, height: seg.h }; }
   for (let i = 0; i < n; i++) maskBuf[i] = Math.min(255, (seg.hair[i] + seg.face[i] + (seg.skin ? seg.skin[i] : 0)) * 255);   // the person: hair, face, ears (and neck)
@@ -492,7 +492,7 @@ function hairFit(seg, pose, W, H, smooth) {
 
 /* ---------------- Render ---------------- */
 const TOUCH = matchMedia("(pointer: coarse)").matches, PHONE = TOUCH && Math.min(screen.width, screen.height) < 820;
-const PROC_MAX = PHONE ? 640 : 1280;   // longest side of the frame the trackers work on
+const PROC_MAX = PHONE ? 480 : 1280;   // longest side of the frame the trackers work on
 const MOVE_TIP = TOUCH ? "drag the hat to move it, pinch to resize" : "drag the hat to move it, scroll to resize";
 const _v = new THREE.Vector3();
 /* The hat's lowest points across its front (brim or visor edge), in the hat's own coordinates; found once per hat. */
@@ -561,7 +561,7 @@ function render(source, W, H, pose) {
     const sideDrop = Math.min(0.3, sideGap * (hat.sides ?? 0.5));
     MU.uSideDrop.value = sideDrop / (F.size * hairScale * F.stretch); MU.uSideDropS.value = sideDrop / HEAD_R[1];   // the shadow line bends with it
     // light
-    if (!stream || !PHONE || lightTick++ % 4 === 0) estimateLight(source, pose, !!stream);   // light changes slowly: phones sample it every 4th frame
+    if (!stream || !PHONE || lightTick++ % 10 === 0) estimateLight(source, pose, !!stream);   // light changes slowly: phones sample it every 10th frame (each sample reads pixels back from the GPU)
     MU.uGrain.value = light.grain; MU.uSeed.value = stream ? (MU.uSeed.value + 17.3) % 1000 : 0;
     const e = light.exp * S.bright;
     hemi.intensity = e * (1.8 - 0.9 * light.contrast); sun.intensity = e * (1.2 + 1.8 * light.contrast);
@@ -609,13 +609,14 @@ async function fetchModel(urls, minSize) {
   }
   throw new Error("Model download failed → " + errs.join(" | "));
 }
+const delegates = [];   // GPU or CPU, per task: shown by ?debug
 async function createTask(make) {
   let lastErr;
   for (const w of WASM_URLS) {
     let fs;
     try { fs = await FilesetResolver.forVisionTasks(w); } catch (e) { lastErr = new Error("WASM load failed: " + e.message); continue; }
     for (const d of ["GPU", "CPU"]) {
-      try { return await make(fs, d); }
+      try { const t = await make(fs, d); delegates.push(d); return t; }
       catch (e) { console.warn(d + " delegate failed:", e); lastErr = new Error(d + " init failed: " + (e.message || e)); }
     }
   }
@@ -638,6 +639,7 @@ async function init(localModel) {
         baseOptions: { modelAssetBuffer: segModel, delegate: d }, runningMode: "VIDEO", outputCategoryMask: false, outputConfidenceMasks: true }));
       const warm = document.createElement("canvas"); warm.width = warm.height = 64; warm.getContext("2d").fillRect(0, 0, 64, 64);
       segmenter.segmentForVideo(warm, performance.now(), () => {});   // compile shaders now, not on the first hat with a brim
+      if (PHONE) startSegWorker(segModel.slice());
     } catch (e) { console.warn("Hair segmentation unavailable, using a head-shaped mask instead:", e); segmenter = null; }
     landmarker = lmk; mode = "VIDEO";   // only now: both tasks are in VIDEO mode, so a photo loaded meanwhile waits in pendingPhoto
     setStatus(segmenter ? "Model ready" : "Model ready (no hair model)", "ok"); statusEl.title = "";
@@ -661,6 +663,48 @@ async function setMode(m) {
 /* face + hair masks for one frame; only needed when the hat has a part that goes behind the head */
 const needMask = () => !!segmenter && ((S.occlude && !!(hat.brim || hat.custom)) || S.shadow > 0);   // the shadow also needs it: only the person takes it
 let segTick = 0;
+/* Phones: the hair mask runs in a worker, so the camera and the hat never wait for it.
+   Each mask is placed with the head pose of the frame it was made from; maskFollow moves it with the head until the next one. */
+let segWorker = null, segWorkerOn = false, segBusy = false, segId = 0, segSent = 0;
+const segPoses = new Map();
+function startSegWorker(model) {
+  if (!window.Worker || !window.createImageBitmap) return;
+  try { segWorker = new Worker(new URL("./seg-worker.js" + new URL(import.meta.url).search, import.meta.url)); }
+  catch (e) { console.warn("Mask worker unavailable:", e); return; }
+  segWorker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "ready") { segWorkerOn = true; delegates.push("worker-" + m.delegate); }
+    else if (m.type === "fail") { console.warn("Mask worker failed, masks stay on the main thread:", m.msg); segWorker.terminate(); segWorker = null; }
+    else if (m.type === "error") { console.warn("Mask worker:", m.msg); }
+    else if (m.type === "mask") {
+      segBusy = false; prof.seg = prof.seg * 0.8 + (performance.now() - segSent) * 0.2;
+      const pose = segPoses.get(m.id); segPoses.clear();
+      if (!m.seg || !pose || !stream || !livePose) return;
+      const W = frameCv.width, H = frameCv.height;
+      m.seg.pose = pose; hairFit(m.seg, pose, W, H, true); lastLiveSeg = m.seg;
+      if (needMask()) { setMask(m.seg, pose); maskFollow(livePose); }
+    }
+  };
+  segWorker.postMessage({ type: "init", model, wasm: WASM_URLS, bundles: [
+    ...(LOCAL ? [new URL("./vendor/vision_bundle.mjs", location.href).href] : []),
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs` ] }, [model.buffer]);
+}
+function segAsync(src, pose, t) {   // send one small frame; at most one in flight, and not more than ~8 a second
+  if (segBusy || t - segSent < 120) return;
+  segBusy = true; segSent = t; const id = ++segId;
+  segPoses.set(id, { ...pose });
+  createImageBitmap(segSmall(src)).then(bitmap => segWorker.postMessage({ type: "frame", bitmap, t, id }, [bitmap]))
+    .catch(e => { segBusy = false; console.warn(e); });
+}
+// the masks come back at the size of the frame they were made from, as floats read back from the GPU:
+// the model itself works at 256x256, so give it a small frame (much less to copy back and loop over)
+const segCv = document.createElement("canvas"), segCtx = segCv.getContext("2d");
+function segSmall(src) {
+  const k = Math.min(1, (PHONE ? 384 : 512) / Math.max(src.width, src.height)), w = Math.round(src.width * k), h = Math.round(src.height * k);
+  if (k === 1) return src;
+  if (segCv.width !== w || segCv.height !== h) { segCv.width = w; segCv.height = h; }
+  segCtx.drawImage(src, 0, 0, w, h); return segCv;
+}
 function segment(source, t) {
   let seg = null;
   const cb = r => {
@@ -713,6 +757,7 @@ function stopCamera() {
     clearView();
   }
 }
+const DEBUG = /[?&]debug/.test(location.search), prof = { track: 0, seg: 0, render: 0 };
 function loop() {
   rafId = requestAnimationFrame(loop);
   if (video.readyState < 2 || video.currentTime === lastVT) return;
@@ -723,21 +768,26 @@ function loop() {
   const t = performance.now(), W = frameCv.width, H = frameCv.height;
   // freeze ONE frame: track and render on the same pixels, so the hat can't trail the head
   frameCtx.drawImage(video, 0, 0, W, H);
-  const res = landmarker.detectForVideo(frameCv, t);
+  const res = landmarker.detectForVideo(frameCv, t); prof.track = prof.track * 0.9 + (performance.now() - t) * 0.1;
   const fi = pickFace(res, W, H, livePose), lm = fi < 0 ? null : res.faceLandmarks[fi];
   if (lm) {
     if (pickFace.switched) resetFilters();
     livePose = headPose(lm, res.facialTransformationMatrixes && res.facialTransformationMatrixes[fi], W, H, t, true); lastSeen = t;
     // the hair/face mask is the heaviest step: on a slow device (a phone) refresh it every 2nd or 3rd frame and reuse it between
-    const every = PHONE ? (fpsAvg && fpsAvg < 12 ? 4 : 3) : !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
+    const every = PHONE ? (!fpsAvg || fpsAvg > 20 ? 3 : fpsAvg > 13 ? 5 : 8) : !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
     const want = needMask() ? segTick++ % every === 0 : segTick++ % 12 === 0;
-    const seg = segmenter && want ? segment(frameCv, t) : null;
+    if (segWorkerOn) {   // phone: masks arrive from the worker, nothing here waits for them
+      if (segmenter && (needMask() || segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
+      setMask(needMask() ? lastLiveSeg : null, livePose); maskFollow(livePose);
+    } else {
+    const t1 = performance.now(), seg = segmenter && want ? segment(segSmall(frameCv), t) : null; if (seg) prof.seg = prof.seg * 0.8 + (performance.now() - t1) * 0.2;
     if (seg) { hairFit(seg, livePose, W, H, true); lastLiveSeg = seg; }
     setMask(needMask() ? seg || lastLiveSeg : null, livePose); maskFollow(livePose);
+    }
   } else if (!livePose || t - lastSeen > HOLD_MS) { livePose = null; resetFilters(); }   // a missed frame or two: keep the hat where it was
-  render(frameCv, W, H, livePose);
+  const t2 = performance.now(); render(frameCv, W, H, livePose); prof.render = prof.render * 0.9 + (performance.now() - t2) * 0.1;
   if (t - lastHint > 250) { lastHint = t; $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame."; }   // text 4x a second: re-layout every frame costs on phones
-  if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps"; }
+  if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps" + (DEBUG ? ` · track ${prof.track | 0} · mask ${prof.seg | 0} · draw ${prof.render | 0} ms · ${W}x${H} · ${delegates.join("/")}` : ""); }
   lastT = t;
 }
 $("camBtn").onclick = startCamera; $("camBtn2").onclick = startCamera;
