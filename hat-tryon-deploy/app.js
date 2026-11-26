@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=e3e5eae";
+import { HATS, A, B } from "./hats.js?v=e5ab0c6";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -55,15 +55,16 @@ let hat = hats[0];
    the midpoint between the ears, scaled to the head width and turned with the tracked rotation, so everything inside
    it is in head widths. It holds an invisible head shape (hides what is behind the head, catches the hat's shadow)
    and the hat. */
-const renderer = new THREE.WebGLRenderer({ canvas: out, antialias: true, alpha: false, preserveDrawingBuffer: true, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ canvas: out, antialias: true, alpha: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(1);
 const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(0, 1, 1, 0, 1, 12000); cam.position.z = 6000;
 let bgTex = null, bgKey = "";
 const maskTex = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
 maskTex.minFilter = maskTex.magFilter = THREE.LinearFilter; maskTex.needsUpdate = true;
-const MU = { uMask: { value: maskTex }, uMaskOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uHeadVz: { value: 0 }, uSoft: { value: 1 }, uRim: { value: 0 }, uSlope: { value: 0 }, uLen: { value: 0.3 }, uSide: { value: 0 }, uCrown: { value: 1 }, uSideDrop: { value: 0 }, uSideDropS: { value: 0 }, uGrain: { value: 0.02 }, uSeed: { value: 0 } };
-const MASK_GLSL = "uniform float uSideDropS; uniform sampler2D uMask; uniform float uMaskOn; uniform vec2 uRes; uniform float uHeadVz; uniform float uSoft; uniform float uRim; uniform float uSlope; uniform float uLen; uniform float uSide; uniform float uGrain; uniform float uSeed; varying float vVz; varying float vHy; varying vec3 vP;\n" +
-  "float personMask(){ return smoothstep(.3, .7, texture2D(uMask, vec2(gl_FragCoord.x / uRes.x, 1. - gl_FragCoord.y / uRes.y)).r); }\n";
+const MU = { uMask: { value: maskTex }, uMaskOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uHeadVz: { value: 0 }, uSoft: { value: 1 }, uRim: { value: 0 }, uSlope: { value: 0 }, uLen: { value: 0.3 }, uSide: { value: 0 }, uCrown: { value: 1 }, uSideDrop: { value: 0 }, uSideDropS: { value: 0 }, uMX: { value: new THREE.Vector3(1, 0, 0) }, uGrain: { value: 0.02 }, uSeed: { value: 0 } };
+const MASK_GLSL = "uniform vec3 uMX; uniform float uSideDropS; uniform sampler2D uMask; uniform float uMaskOn; uniform vec2 uRes; uniform float uHeadVz; uniform float uSoft; uniform float uRim; uniform float uSlope; uniform float uLen; uniform float uSide; uniform float uGrain; uniform float uSeed; varying float vVz; varying float vHy; varying vec3 vP;\n" +
+  "float personMask(){ vec2 q = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) * uMX.x + uMX.yz;   // where this pixel was when the mask was made\n" +
+  " return smoothstep(.3, .7, texture2D(uMask, q / uRes).r); }\n";
 /* Hat materials: the low parts of the hat (brim) that lie behind the head are hidden where the picture shows hair or
    face. Shadow material: the shadow is only drawn on the person. */
 function maskAware(mat, shadow, opaque) {
@@ -391,9 +392,13 @@ class OneEuro {
   reset() { this.x = null; this.dx = 0; }
 }
 /* position in pixels, angles in radians, sizes in pixels / head widths */
-const filt = { cx: new OneEuro(1.2, 0.25, 1), cy: new OneEuro(1.2, 0.25, 1), w: new OneEuro(0.6, 0.05, 1),
-  yaw: new OneEuro(1, 6, 1), pitch: new OneEuro(1, 6, 1), roll: new OneEuro(1.2, 8, 1), h: new OneEuro(0.25, 0.5, 1), fz: new OneEuro(0.25, 0.5, 1), brow: new OneEuro(0.25, 0.5, 1),
-  q0: new OneEuro(1, 6, 1), q1: new OneEuro(1, 6, 1), q2: new OneEuro(1, 6, 1), q3: new OneEuro(1, 6, 1) };
+// phones run at a lower frame rate: each filter step is longer, so the time-based
+// smoothing trails the head. Faster cutoffs there keep the hat on the head as it moves.
+const FK = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 820 ? 2.2 : 1;
+const OE = (c, b, d) => new OneEuro(c * FK, b, d);
+const filt = { cx: OE(1.2, 0.25, 1), cy: OE(1.2, 0.25, 1), w: OE(0.6, 0.05, 1),
+  yaw: OE(1, 6, 1), pitch: OE(1, 6, 1), roll: OE(1.2, 8, 1), h: OE(0.25, 0.5, 1), fz: OE(0.25, 0.5, 1), brow: OE(0.25, 0.5, 1),
+  q0: OE(1, 6, 1), q1: OE(1, 6, 1), q2: OE(1, 6, 1), q3: OE(1, 6, 1) };
 let lastQ = null;
 const resetFilters = () => { Object.values(filt).forEach(f => f.reset()); lastQ = null; };
 
@@ -445,8 +450,16 @@ function headPose(lm, mat, W, H, t, useFilter) {
 /* ---------------- Person mask (face + hair) ---------------- */
 let maskBuf = null;
 /* seg: { hair, face, w, h } soft masks from the segmenter, or null */
-function setMask(seg) {
+/* A mask made a few frames ago is moved and scaled with the head since then, so it stays on the person. */
+let maskPose = null, lastMaskSeg = null;
+function maskFollow(pose) {
+  if (!maskPose || !pose) { MU.uMX.value.set(1, 0, 0); return; }
+  const k = maskPose.w / pose.w; MU.uMX.value.set(k, maskPose.cx - k * pose.cx, maskPose.cy - k * pose.cy);
+}
+function setMask(seg, pose) {
   MU.uMaskOn.value = seg ? 1 : 0; if (!seg) return;
+  if (seg === lastMaskSeg) return;   // same mask as before: only its placement changes (maskFollow)
+  lastMaskSeg = seg; maskPose = pose ? { cx: pose.cx, cy: pose.cy, w: pose.w } : null;
   const n = seg.w * seg.h;
   if (!maskBuf || maskBuf.length !== n) { maskBuf = new Uint8Array(n); maskTex.dispose(); maskTex.image = { data: maskBuf, width: seg.w, height: seg.h }; }
   for (let i = 0; i < n; i++) maskBuf[i] = Math.min(255, (seg.hair[i] + seg.face[i] + (seg.skin ? seg.skin[i] : 0)) * 255);   // the person: hair, face, ears (and neck)
@@ -479,6 +492,7 @@ function hairFit(seg, pose, W, H, smooth) {
 
 /* ---------------- Render ---------------- */
 const TOUCH = matchMedia("(pointer: coarse)").matches, PHONE = TOUCH && Math.min(screen.width, screen.height) < 820;
+const PROC_MAX = PHONE ? 640 : 1280;   // longest side of the frame the trackers work on
 const MOVE_TIP = TOUCH ? "drag the hat to move it, pinch to resize" : "drag the hat to move it, scroll to resize";
 const _v = new THREE.Vector3();
 /* The hat's lowest points across its front (brim or visor edge), in the hat's own coordinates; found once per hat. */
@@ -547,7 +561,7 @@ function render(source, W, H, pose) {
     const sideDrop = Math.min(0.3, sideGap * (hat.sides ?? 0.5));
     MU.uSideDrop.value = sideDrop / (F.size * hairScale * F.stretch); MU.uSideDropS.value = sideDrop / HEAD_R[1];   // the shadow line bends with it
     // light
-    estimateLight(source, pose, !!stream);
+    if (!stream || !PHONE || lightTick++ % 4 === 0) estimateLight(source, pose, !!stream);   // light changes slowly: phones sample it every 4th frame
     MU.uGrain.value = light.grain; MU.uSeed.value = stream ? (MU.uSeed.value + 17.3) % 1000 : 0;
     const e = light.exp * S.bright;
     hemi.intensity = e * (1.8 - 0.9 * light.contrast); sun.intensity = e * (1.2 + 1.8 * light.contrast);
@@ -614,7 +628,7 @@ async function init(localModel) {
     setStatus("Loading face model…");
     const model = localModel || await fetchModel(FACE_MODEL_URLS, 1e6);
     const lmk = await createTask((fs, d) => FaceLandmarker.createFromOptions(fs, {
-      baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numFaces: 3,
+      baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numFaces: PHONE ? 2 : 3,
       outputFacialTransformationMatrixes: true,
       minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5 }));
     setStatus("Loading hair model…");
@@ -660,7 +674,7 @@ function segment(source, t) {
 }
 
 /* ---------------- Camera ---------------- */
-let lastLiveSeg = null;
+let lastLiveSeg = null, lastHint = 0, lightTick = 0;
 let stream = null, lastVT = -1, fpsAvg = 0, lastT = 0, rafId = 0, mirrored = false, livePose = null, lastSeen = 0;
 const HOLD_MS = 250;   // how long the hat stays put when tracking drops out for a moment (blink, motion blur, hand)
 /* With other people in the picture, stay with the person already wearing the hat; otherwise take the biggest face
@@ -686,7 +700,7 @@ async function startCamera() {
   video.srcObject = stream; await video.play();
   await setMode("VIDEO"); resetFilters();
   still = null; stillPose = null; mirrored = true; out.classList.add("mirror"); ovl.classList.add("mirror");
-  frameCv.width = video.videoWidth; frameCv.height = video.videoHeight;
+  { const ps = Math.min(1, PROC_MAX / Math.max(video.videoWidth, video.videoHeight)); frameCv.width = Math.round(video.videoWidth * ps); frameCv.height = Math.round(video.videoHeight * ps); }
   $("empty").style.display = "none"; $("snapBtn").disabled = false; cmp.disabled = false; fpsEl.style.display = ""; vp.classList.add("live");
   $("camBtn").textContent = "Stop camera"; setStatus("Model ready", "ok");
   loop();
@@ -704,7 +718,8 @@ function loop() {
   if (video.readyState < 2 || video.currentTime === lastVT) return;
   lastVT = video.currentTime;
   // the camera's frame size can change after it starts (iOS reports it late, and turning a phone swaps width and height)
-  if (video.videoWidth && (video.videoWidth !== frameCv.width || video.videoHeight !== frameCv.height)) { frameCv.width = video.videoWidth; frameCv.height = video.videoHeight; resetFilters(); livePose = null; }
+  const vw = video.videoWidth, vh = video.videoHeight, ps = Math.min(1, PROC_MAX / Math.max(vw, vh));   // phones: work on a smaller frame
+  if (vw && (Math.round(vw * ps) !== frameCv.width || Math.round(vh * ps) !== frameCv.height)) { frameCv.width = Math.round(vw * ps); frameCv.height = Math.round(vh * ps); resetFilters(); livePose = null; lastLiveSeg = null; }
   const t = performance.now(), W = frameCv.width, H = frameCv.height;
   // freeze ONE frame: track and render on the same pixels, so the hat can't trail the head
   frameCtx.drawImage(video, 0, 0, W, H);
@@ -714,14 +729,14 @@ function loop() {
     if (pickFace.switched) resetFilters();
     livePose = headPose(lm, res.facialTransformationMatrixes && res.facialTransformationMatrixes[fi], W, H, t, true); lastSeen = t;
     // the hair/face mask is the heaviest step: on a slow device (a phone) refresh it every 2nd or 3rd frame and reuse it between
-    const every = !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
+    const every = PHONE ? (fpsAvg && fpsAvg < 12 ? 4 : 3) : !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
     const want = needMask() ? segTick++ % every === 0 : segTick++ % 12 === 0;
     const seg = segmenter && want ? segment(frameCv, t) : null;
     if (seg) { hairFit(seg, livePose, W, H, true); lastLiveSeg = seg; }
-    setMask(needMask() ? seg || lastLiveSeg : null);
+    setMask(needMask() ? seg || lastLiveSeg : null, livePose); maskFollow(livePose);
   } else if (!livePose || t - lastSeen > HOLD_MS) { livePose = null; resetFilters(); }   // a missed frame or two: keep the hat where it was
   render(frameCv, W, H, livePose);
-  $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame.";
+  if (t - lastHint > 250) { lastHint = t; $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame."; }   // text 4x a second: re-layout every frame costs on phones
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps"; }
   lastT = t;
 }
@@ -747,7 +762,7 @@ function refreshStill() {
   if (!still || stream) return;
   if (segmenter && stillSeg === null) { stillSeg = (stillPose && segment(still, 0)) || false; if (stillSeg) hairFit(stillSeg, stillPose, still.width, still.height, false); }   // false: tried, nothing to use
   if (!stillSeg) { hairScale = HAT_SCALE; hairTop = null; }
-  setMask(needMask() && stillSeg ? stillSeg : null);
+  setMask(needMask() && stillSeg ? stillSeg : null, stillPose); maskPose = null; maskFollow(null);
   $("hint").textContent = stillPose ? "Face found · " + poseText(stillPose) + " · " + MOVE_TIP : "No face found. Try a clearer photo with the whole head visible.";
   requestStill();
 }
@@ -809,6 +824,7 @@ vp.addEventListener("wheel", e => {
 
 /* ---------------- Snapshot ---------------- */
 $("snapBtn").onclick = () => {
+  renderer.render(scene, cam);   // the drawing buffer is not kept between frames: draw it again right before copying it
   const c = document.createElement("canvas"); c.width = out.width; c.height = out.height; const x = c.getContext("2d");
   if (mirrored) { x.translate(c.width, 0); x.scale(-1, 1); }
   x.drawImage(out, 0, 0);
