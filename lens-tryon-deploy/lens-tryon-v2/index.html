@@ -545,9 +545,20 @@ function applyLens(g, W, H){
   // with the eye model, lids / blinks / fingers are in its mask; without it, fall back to landmarks + blendshapes
   // with the model: still fade on the per-eye blink score (the model has seen few half-closed eyes, and dark lashes on a
   // closing lid can look like iris to it). Without: landmarks + blendshapes as before.
-  // ...and on how much of the iris the lids still leave visible (a closing eye shows a thin slit of lashes)
-  const openFade = SEG ? Math.min(1-smooth(.35,.6,g.blink||0), smooth(.18,.38,SEG.visFrac))
+  // ...and on how much of the iris the lids still leave visible (a closing eye shows a thin slit of lashes).
+  // Measured against the face tracker's iris size, which stays constant through a blink (the model's own circle
+  // can shrink as the eye closes, which would keep this share high).
+  let visShare=1;
+  if(SEG){ const m=SEG.m, uc=m.a*g.cx+m.c*g.cy+m.e, vc=m.b*g.cx+m.d*g.cy+m.f-m.row*SEG_H, rc=Math.max(2,g.rx*m.sc);
+    let nI=0, nO=0;
+    for(let v=Math.max(0,vc-rc|0); v<Math.min(SEG_H,vc+rc+1); v++) for(let u=Math.max(0,uc-rc|0); u<Math.min(SEG_W,uc+rc+1); u++){
+      const du=u+.5-uc, dv=v+.5-vc; if(du*du+dv*dv>rc*rc) continue; const i=v*SEG_W+u;
+      if(SEG.iris[i]>.5) nI++; else if(SEG.occ[i]>.5) nO++; }
+    visShare=nI/Math.max(1,Math.PI*rc*rc-nO); }
+  g.visShare=visShare;
+  const openFade = SEG ? Math.min(1-smooth(.35,.6,g.blink||0), smooth(.18,.38,visShare))
                        : smooth(.08,.16,g.open)*(1-smooth(.38,.58,g.blink||0));
+  g.openFade=openFade;
   if(SEG && SEG.nIris<6) return;                                  // closed eye, hand over the eye: nothing to colour
   if(openFade<=0.01 || g.rx < 2.5) return;
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
@@ -772,6 +783,11 @@ function applyLens(g, W, H){
 
 function drawDebug(g){
   ctx.save(); ctx.lineWidth=Math.max(1,g.rx*.06);
+  { const t=(g.seg?"AI ":"classic ")+"vis "+(g.visShare??1).toFixed(2)+" blink "+(g.blink||0).toFixed(2)+" lens "+(g.openFade??1).toFixed(2);
+    ctx.save(); if(mirrored){ ctx.translate(2*g.cx,0); ctx.scale(-1,1); }       // the view is mirrored by CSS: keep text readable
+    ctx.font=`600 ${Math.max(11,g.rx*.7)|0}px system-ui`; const tw=ctx.measureText(t).width;
+    ctx.fillStyle="rgba(0,0,0,.6)"; ctx.fillRect(g.cx-tw/2-4,g.cy-g.rx*3.2,tw+8,Math.max(11,g.rx*.7)+6);
+    ctx.fillStyle="#fff"; ctx.textBaseline="top"; ctx.fillText(t,g.cx-tw/2,g.cy-g.rx*3.2+3); ctx.restore(); }
   ctx.strokeStyle="rgba(94,224,198,.95)"; drawSmoothPoly(ctx,g.poly,0,0); ctx.stroke();
   ctx.strokeStyle="rgba(124,156,255,.95)"; ctx.beginPath();
   ctx.ellipse(g.pcx??g.cx,g.pcy??g.cy,g.rx*S.size,g.ry*S.size,Math.atan2(g.uy,g.ux),0,Math.PI*2); ctx.stroke();
@@ -812,7 +828,7 @@ function processFrame(source, W, H, lmList, t, useFilter, segs){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink,visFrac:g.seg?g.seg.visFrac:null}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink,visFrac:g.seg?+g.visShare.toFixed(3):null,fade:g.openFade,model:!!g.seg}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
@@ -1036,7 +1052,7 @@ function recordFrame(t, procMs, found){
   }
   const rd=v=>v==null?null:+(+v).toFixed(2);
   r.log.frames.push({ n:r.n, t:+ts.toFixed(3), fps:rd(fpsAvg), procMs:rd(procMs), found,
-    eyes:(window.__eyes||[]).map(e=>({cx:rd(e.cx),cy:rd(e.cy),pcx:rd(e.pcx),pcy:rd(e.pcy),rx:rd(e.rx),open:rd(e.open),pupil:rd(e.pupil),vis:e.dbg?e.dbg.vis:null,occluded:e.dbg?!(e.dbg.matchOK&&e.dbg.contrastOK):null})) });
+    eyes:(window.__eyes||[]).map(e=>({cx:rd(e.cx),cy:rd(e.cy),pcx:rd(e.pcx),pcy:rd(e.pcy),rx:rd(e.rx),open:rd(e.open),pupil:rd(e.pupil),vis:e.dbg?e.dbg.vis:null,occluded:e.dbg?!(e.dbg.matchOK&&e.dbg.contrastOK):null,blink:rd(e.blink),visShare:rd(e.visFrac),fade:rd(e.fade),model:e.model})), segMs:rd(segMs) });
   r.n++;
 }
 function stopRecording(){
