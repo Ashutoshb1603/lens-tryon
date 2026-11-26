@@ -1,8 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=f4940b4";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=f4940b4";
+import { HATS, A, B } from "./hats.js?v=d05c35f";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=d05c35f";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -144,7 +144,8 @@ const TILT_BACK = 9 * Math.PI / 180;   // a hat sits lower at the back of the he
    and head pitch from one camera is the least reliable angle: at full strength the brim's far side swings down past
    the face like a lampshade. Limiting the view of the hat keeps it on the head; the band stays on the forehead. */
 /* Soft limits: past the knee the hat still follows the head, more and more stiffly, up to the limit. */
-const VIEW_UNDER = Math.sin(22 * Math.PI / 180), VIEW_OVER = Math.sin(32 * Math.PI / 180), KNEE_UNDER = Math.sin(11 * Math.PI / 180), KNEE_OVER = Math.sin(20 * Math.PI / 180);
+// looking up shows the underside of a visor or brim, as it should: the hat tips back with the head (limit only near 90°)
+const VIEW_UNDER = Math.sin(80 * Math.PI / 180), VIEW_OVER = Math.sin(32 * Math.PI / 180), KNEE_UNDER = Math.sin(70 * Math.PI / 180), KNEE_OVER = Math.sin(20 * Math.PI / 180);
 const soft = (v, knee, lim) => v <= knee ? v : knee + (lim - knee) * Math.tanh((v - knee) / (lim - knee));
 const _hy = new THREE.Vector3(), _hz = new THREE.Vector3();
 /* tilt back (radians, about the head's x axis) that keeps the hat's up axis within the limits, as close to t0 as possible */
