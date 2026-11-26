@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=83b9fc1";
+import { HATS, A, B } from "./hats.js?v=5970dce";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -641,7 +641,8 @@ async function init(localModel) {
       segmenter.segmentForVideo(warm, performance.now(), () => {});   // compile shaders now, not on the first hat with a brim
       if (PHONE) startSegWorker(segModel.slice());
     } catch (e) { console.warn("Hair segmentation unavailable, using a head-shaped mask instead:", e); segmenter = null; }
-    landmarker = lmk; mode = "VIDEO";   // only now: both tasks are in VIDEO mode, so a photo loaded meanwhile waits in pendingPhoto
+    landmarker = lmk; mode = "VIDEO";
+    if (PHONE) startTrackWorker(model.slice());   // only now: both tasks are in VIDEO mode, so a photo loaded meanwhile waits in pendingPhoto
     setStatus(segmenter ? "Model ready" : "Model ready (no hair model)", "ok"); statusEl.title = "";
     $("camBtn").disabled = false; $("camBtn2").disabled = false; $("modelPick").style.display = "none";
     if (pendingPhoto) { const p = pendingPhoto; pendingPhoto = null; loadPhoto(p); }
@@ -723,6 +724,50 @@ let stream = null, lastVT = -1, fpsAvg = 0, lastT = 0, rafId = 0, mirrored = fal
 const HOLD_MS = 250;   // how long the hat stays put when tracking drops out for a moment (blink, motion blur, hand)
 /* With other people in the picture, stay with the person already wearing the hat; otherwise take the biggest face
    (the one nearest the camera). Returns an index into the tracker's results, or -1. */
+/* Phones: face tracking in a worker. The camera picture is drawn every frame; the hat uses the latest
+   tracking result, carried forward by the head's speed to the frame on screen. */
+let trackWorker = null, trackOn = false, trackBusy = false, trackId = 0, trackSent = 0, trackedPose = null, trackKey = "";
+const vel = { x: 0, y: 0 };
+function startTrackWorker(model) {
+  if (!window.Worker || !window.createImageBitmap) return;
+  try { trackWorker = new Worker(new URL("./track-worker.js" + new URL(import.meta.url).search, import.meta.url)); }
+  catch (e) { console.warn("Tracking worker unavailable:", e); return; }
+  trackWorker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "ready") { trackOn = true; delegates.push("track-" + m.delegate); }
+    else if (m.type === "fail") { console.warn("Tracking worker failed, tracking stays on the main thread:", m.msg); trackWorker.terminate(); trackWorker = null; }
+    else if (m.type === "error") console.warn("Tracking worker:", m.msg);
+    else if (m.type === "res") {
+      trackBusy = false; prof.track = prof.track * 0.8 + (performance.now() - trackSent) * 0.2;
+      const W = frameCv.width, H = frameCv.height;
+      if (!stream || !m.res || m.key !== trackKey) return;   // camera stopped, or the frame size changed meanwhile
+      const fi = pickFace(m.res, W, H, trackedPose), lm = fi < 0 ? null : m.res.faceLandmarks[fi];
+      if (lm) {
+        if (pickFace.switched) { resetFilters(); trackedPose = null; }
+        const p = headPose(lm, m.res.facialTransformationMatrixes[fi], W, H, m.t, true); p._t = m.t;
+        if (trackedPose) {
+          const dt = m.t - trackedPose._t;
+          if (dt > 0 && dt < 400) { vel.x = vel.x * 0.5 + (p.cx - trackedPose.cx) / dt * 0.5; vel.y = vel.y * 0.5 + (p.cy - trackedPose.cy) / dt * 0.5; }
+        } else vel.x = vel.y = 0;
+        trackedPose = p; lastSeen = m.t;
+      } else if (!trackedPose || m.t - lastSeen > HOLD_MS) { trackedPose = null; vel.x = vel.y = 0; resetFilters(); }
+    }
+  };
+  trackWorker.postMessage({ type: "init", model, numFaces: 2, wasm: WASM_URLS, bundles: [
+    ...(LOCAL ? [new URL("./vendor/vision_bundle.mjs", location.href).href] : []),
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs` ] }, [model.buffer]);
+}
+function sendTrack(t) {
+  trackBusy = true; trackSent = t; const id = ++trackId, key = trackKey;
+  createImageBitmap(frameCv).then(bitmap => trackWorker.postMessage({ type: "frame", bitmap, t, id, key }, [bitmap]))
+    .catch(e => { trackBusy = false; console.warn(e); });
+}
+function predictPose(t, W, H) {   // the last tracked pose, moved on by the head's speed (damped, at most 150 ms ahead)
+  const p = trackedPose; if (!p) return null;
+  const dt = Math.min(150, Math.max(0, t - p._t)), dx = vel.x * dt * 0.8, dy = vel.y * dt * 0.8;
+  if (!dx && !dy) return p;
+  return { ...p, cx: p.cx + dx, cy: p.cy + dy, lm: p.lm.map(a => ({ x: a.x + dx / W, y: a.y + dy / H, z: a.z })) };
+}
 function pickFace(res, W, H, prev) {
   const faces = res.faceLandmarks || []; let best = -1, score = Infinity;
   for (let i = 0; i < faces.length; i++) {
@@ -739,10 +784,10 @@ const frameCv = document.createElement("canvas"), frameCtx = frameCv.getContext(
 async function startCamera() {
   if (stream) { stopCamera(); return; }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: PHONE ? { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: PHONE ? { facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
   } catch (e) { setStatus("Camera blocked — allow access or open via http://localhost", "err"); return; }
   video.srcObject = stream; await video.play();
-  await setMode("VIDEO"); resetFilters();
+  await setMode("VIDEO"); resetFilters(); trackedPose = null; vel.x = vel.y = 0;
   still = null; stillPose = null; mirrored = true; out.classList.add("mirror"); ovl.classList.add("mirror");
   { const ps = Math.min(1, PROC_MAX / Math.max(video.videoWidth, video.videoHeight)); frameCv.width = Math.round(video.videoWidth * ps); frameCv.height = Math.round(video.videoHeight * ps); }
   $("empty").style.display = "none"; $("snapBtn").disabled = false; cmp.disabled = false; fpsEl.style.display = ""; vp.classList.add("live");
@@ -758,16 +803,30 @@ function stopCamera() {
   }
 }
 const DEBUG = /[?&]debug/.test(location.search), prof = { track: 0, seg: 0, render: 0 };
+const cutBox = new THREE.Box3();
+function hatCut(H) {   // is the top of the hat above the camera picture (head too close to the top edge)?
+  if (!headG.visible || !hat.group) return false;
+  cutBox.setFromObject(hat.group); return cutBox.max.y > H + 2;
+}
 function loop() {
   rafId = requestAnimationFrame(loop);
   if (video.readyState < 2 || video.currentTime === lastVT) return;
   lastVT = video.currentTime;
   // the camera's frame size can change after it starts (iOS reports it late, and turning a phone swaps width and height)
   const vw = video.videoWidth, vh = video.videoHeight, ps = Math.min(1, PROC_MAX / Math.max(vw, vh));   // phones: work on a smaller frame
-  if (vw && (Math.round(vw * ps) !== frameCv.width || Math.round(vh * ps) !== frameCv.height)) { frameCv.width = Math.round(vw * ps); frameCv.height = Math.round(vh * ps); resetFilters(); livePose = null; lastLiveSeg = null; }
+  if (vw && (Math.round(vw * ps) !== frameCv.width || Math.round(vh * ps) !== frameCv.height)) { frameCv.width = Math.round(vw * ps); frameCv.height = Math.round(vh * ps); resetFilters(); livePose = null; lastLiveSeg = null; trackedPose = null; }
   const t = performance.now(), W = frameCv.width, H = frameCv.height;
   // freeze ONE frame: track and render on the same pixels, so the hat can't trail the head
   frameCtx.drawImage(video, 0, 0, W, H);
+  if (trackOn) {   // phone: never wait for the tracker
+    trackKey = W + "x" + H;
+    if (!trackBusy) sendTrack(t);
+    livePose = predictPose(t, W, H);
+    if (livePose && segWorkerOn) {
+      if (segmenter && (needMask() || segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
+      setMask(needMask() ? lastLiveSeg : null, livePose); maskFollow(livePose);
+    } else if (!livePose) MU.uMaskOn.value = 0;
+  } else {
   const res = landmarker.detectForVideo(frameCv, t); prof.track = prof.track * 0.9 + (performance.now() - t) * 0.1;
   const fi = pickFace(res, W, H, livePose), lm = fi < 0 ? null : res.faceLandmarks[fi];
   if (lm) {
@@ -785,8 +844,9 @@ function loop() {
     setMask(needMask() ? seg || lastLiveSeg : null, livePose); maskFollow(livePose);
     }
   } else if (!livePose || t - lastSeen > HOLD_MS) { livePose = null; resetFilters(); }   // a missed frame or two: keep the hat where it was
+  }
   const t2 = performance.now(); render(frameCv, W, H, livePose); prof.render = prof.render * 0.9 + (performance.now() - t2) * 0.1;
-  if (t - lastHint > 250) { lastHint = t; $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame."; }   // text 4x a second: re-layout every frame costs on phones
+  if (t - lastHint > 250) { lastHint = t; $("hint").textContent = livePose && hatCut(H) ? "The hat goes past the top of the picture: move the phone back a little or tilt it up." : livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame."; }   // text 4x a second: re-layout every frame costs on phones
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps" + (DEBUG ? ` · track ${prof.track | 0} · mask ${prof.seg | 0} · draw ${prof.render | 0} ms · ${W}x${H} · ${delegates.join("/")}` : ""); }
   lastT = t;
 }
