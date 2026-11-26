@@ -185,7 +185,7 @@
 
     <div>
       <h3>Adjust</h3>
-      <div class="ctl"><label>Intensity <b id="v_intensity"></b></label><input type="range" id="intensity" min="0" max="1" step="0.01" value="0.6"></div>
+      <div class="ctl"><label>Intensity <b id="v_intensity"></b></label><input type="range" id="intensity" min="0" max="1" step="0.01" value="0.4"></div>
       <div class="ctl"><label>Lens diameter <b id="v_size"></b></label><input type="range" id="size" min="0.85" max="1.25" step="0.01" value="1.04"></div>
       <div class="ctl"><label>Pupil opening (manual) <b id="v_pupil"></b></label><input type="range" id="pupil" min="0.18" max="0.55" step="0.01" value="0.34"></div>
       <div class="ctl"><label>Keep natural iris texture <b id="v_texture"></b></label><input type="range" id="texture" min="0" max="1" step="0.01" value="1"></div>
@@ -253,7 +253,7 @@ const CORNERS_A = [33,133], CORNERS_B = [263,362];
 const IRIS_1 = [468,469,470,471,472], IRIS_2 = [473,474,475,476,477];               // center + 4 contour pts
 
 /* ---------------- Settings ---------------- */
-const S = { zone:.46, print:.5, intensity:.6, size:1.04, pupil:.34, texture:1, limbal:.5, compare:false, debug:false, keyWhite:true, autoPupil:true, eyeModel:true, split:.5 };
+const S = { zone:.46, print:.5, intensity:.4, size:1.04, pupil:.34, texture:1, limbal:.5, compare:false, debug:false, keyWhite:true, autoPupil:true, eyeModel:true, split:.5 };
 ["intensity","size","pupil","texture","limbal","print","zone"].forEach(k=>{
   const el=$(k), v=$("v_"+k);
   const show=()=>{ v.textContent = (+el.value).toFixed(2); };
