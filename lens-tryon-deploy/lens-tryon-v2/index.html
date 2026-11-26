@@ -6,6 +6,13 @@
 <meta name="theme-color" content="#0d0f14">
 <title>Lens Try-On — Live Contact Lens Preview</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232c5fd0'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%230b0d12'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0d0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lens Try-On">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -116,6 +123,21 @@
     input[type=range]{height:28px}
     .toggle{padding:9px 0}
     .toggle input{width:44px;height:24px}
+    .brand{font-size:15px;white-space:nowrap}
+    #fps{display:none!important}                                  /* phones: keep the header to one line */
+    body.debug #fps{display:inline-block!important}
+    .pill{font-size:12px;padding:3px 9px}
+    .viewport{max-height:60svh}
+    .mobile-lenses{margin:12px 0 4px}
+    .mobile-lenses h3{margin:0 0 8px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600}
+    .mobile-lenses .swatches{margin:0 -12px;padding:2px 12px 8px}
+    .mobile-lenses .upload{margin-top:6px}
+    details.more summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;
+      font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600;padding:4px 0}
+    details.more summary::-webkit-details-marker{display:none}
+    details.more summary::after{content:"+";font-size:18px;font-weight:400}
+    details.more[open] summary::after{content:"–"}
+    details.more > div{margin-top:14px}
   }
   @media (max-width:900px) and (orientation:landscape){ .viewport{max-height:78svh} }
 </style>
@@ -192,7 +214,7 @@
     </details>
 
     <div class="foot">
-      Runs fully in your browser. MediaPipe Face Landmarker gives the iris and eyelid landmarks. The lens is fitted to the iris ellipse, hidden under the eyelids, and blended so your natural shading and catchlights show through. No images leave your device.
+      Runs fully in your browser, on phones too. MediaPipe tracks the face; our eye model finds the visible iris, so the lens stays off fingers, lids and lashes. Your natural shading and catchlights show through. No images leave your device. On a phone, use “Add to Home Screen” for a full-screen app.
     </div>
   </aside>
 </main>
@@ -206,6 +228,8 @@
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, FilesetResolver;
 const LOCAL = location.protocol !== "file:";
+const NARROW=()=>matchMedia("(max-width:900px)").matches;
+const IS_PHONE = matchMedia("(max-width:900px)").matches && matchMedia("(pointer:coarse)").matches;
 for (const src of [
   ...(LOCAL ? ["./vision_bundle.mjs"] : []),
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs",
@@ -237,7 +261,7 @@ const S = { zone:.46, print:.35, intensity:.85, size:1.04, pupil:.34, texture:.8
   el.addEventListener("input",()=>{ S[k]=+el.value; show(); if(k==="limbal"||k==="print") rebuildLens(); requestStill(); });
 });
 ["compare","debug","keyWhite","autoPupil","eyeModel"].forEach(k=>$(k).addEventListener("change",e=>{
-  S[k]=e.target.checked; if(k==="eyeModel"){ resetFilters(); if(still) refreshStillSeg(); } if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
+  S[k]=e.target.checked; if(k==="debug") document.body.classList.toggle("debug",S.debug); if(k==="eyeModel"){ resetFilters(); if(still) refreshStillSeg(); } if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
 }));
 
 /* ---------------- Procedural lens textures ---------------- */
@@ -452,7 +476,15 @@ function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter, s
 const SEG_W=128, SEG_H=64, SEG_SPAN=2.2;
 const segCv=document.createElement("canvas"); segCv.width=SEG_W; segCv.height=SEG_H*2;
 const segCtx=segCv.getContext("2d",{willReadFrequently:true});
-let segSession=null, ortMod=null, segBusy=false, segMs=0, segEP="";
+let segSession=null, ortMod=null, segBusy=false, segMs=0, segEP="", lastSegs=null, segSkip=0, frameMs=0;
+// re-use the previous frame's masks on a new frame: masks live in eye-aligned crop space, so mapping them through
+// THIS frame's eye-corner affine keeps the lens attached to the eye while the model rests every other frame
+function carrySegs(prev, lm, W, H){
+  if(!prev) return null;
+  const aff=[eyeAffine(lm,W,H,CORNERS_A,0), eyeAffine(lm,W,H,CORNERS_B,1)];
+  return prev.map((p,k)=>{ const m=aff[k], det=m.a*m.d-m.b*m.c, du=p.u-m.e, dv=p.v+m.row*SEG_H-m.f;
+    return {...p, m, cx:(m.d*du-m.c*dv)/det, cy:(-m.b*du+m.a*dv)/det, r:p.rc/m.sc}; });
+}
 async function loadEyeModel(){
   if(new URLSearchParams(location.search).get("eyemodel")==="0"){ S.eyeModel=false; $("eyeModel").checked=false; return; }
   try{
@@ -500,7 +532,7 @@ async function runEyeSeg(source, lm, W, H){
     // circle back to image pixels (inverse of the affine)
     const u=circ[k*4]*SEG_W, v=circ[k*4+1]*SEG_H+m.row*SEG_H, r=circ[k*4+2]*SEG_W, det=m.a*m.d-m.b*m.c;
     const du=u-m.e, dv=v-m.f, X=(m.d*du-m.c*dv)/det, Y=(-m.b*du+m.a*dv)/det;
-    return {m, iris, occ, nIris, visFrac, cx:X, cy:Y, r:r/m.sc, present:circ[k*4+3]};
+    return {m, iris, occ, nIris, visFrac, cx:X, cy:Y, r:r/m.sc, present:circ[k*4+3], u, v:v-m.row*SEG_H, rc:r};
   });
 }
 // probability that image pixel (X,Y) is visible iris/pupil, bilinear in the crop
@@ -933,7 +965,9 @@ function sizeOut(W,H){ out.width=W; out.height=H; vp.style.setProperty("--ar",W+
 async function openStream(){
   if(!navigator.mediaDevices?.getUserMedia){ setStatus("Camera needs HTTPS or http://localhost","err"); return false; }
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:facing},audio:false});
+    const portrait = IS_PHONE && matchMedia("(orientation: portrait)").matches;
+    const vc = portrait ? {width:{ideal:720},height:{ideal:960}} : {width:{ideal:1280},height:{ideal:720}};
+    stream=await navigator.mediaDevices.getUserMedia({video:{...vc,facingMode:facing},audio:false});
   }catch(e){
     setStatus(e && e.name==="NotFoundError" ? "No camera found. Upload a photo instead" : "Camera blocked. Allow access, or open via https / http://localhost","err");
     return false; }
@@ -950,7 +984,8 @@ async function startCamera(){
   await setMode("VIDEO");
   still=null; stillLm=null; irisModel[0]=irisModel[1]=null;                 // a new session may be a different person
   $("empty").style.display="none"; $("snapBtn").disabled=false; $("recBtn").disabled=false; fpsEl.style.display="";
-  $("camBtn").textContent="Stop camera"; setStatus("Model ready","ok"); updateSplitUI();
+  $("camBtn").textContent="Stop camera"; setStatus(segSession&&S.eyeModel?"Ready · eye AI on":"Model ready","ok"); updateSplitUI();
+  keepAwake(true);
   try{ const n=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput").length;
     $("flipBtn").style.display = n>1 ? "" : "none"; }catch{}
   loop();
@@ -968,6 +1003,7 @@ function stopCamera(){
   $("recBtn").disabled=true;
   cancelAnimationFrame(rafId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null;
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
+  keepAwake(false); lastSegs=null;
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
 async function loop(){
@@ -986,14 +1022,18 @@ async function loop(){
   lastBlend=res.faceBlendshapes&&res.faceBlendshapes[0]?res.faceBlendshapes[0].categories:null;
   let segs=null;
   if(S.eyeModel && segSession && res.faceLandmarks && res.faceLandmarks.length){
-    segBusy=true; try{ segs=await runEyeSeg(frameCv,res.faceLandmarks[0],out.width,out.height); }catch(e){ console.warn(e); } segBusy=false;
+    // phones that can't hold ~22 fps run the model on alternate frames (masks carried over in between)
+    const skip = frameMs>45 && lastSegs && (segSkip=(segSkip+1)%2)===1;
+    if(skip) segs=carrySegs(lastSegs,res.faceLandmarks[0],out.width,out.height);
+    else{ segBusy=true; try{ segs=await runEyeSeg(frameCv,res.faceLandmarks[0],out.width,out.height); lastSegs=segs; }catch(e){ console.warn(e); } segBusy=false; }
     if(!stream) return;                                             // camera stopped while the model ran
-  }
+  } else lastSegs=null;
   const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true,segs);
   perf.detect+=(tDet-tProc-perf.detect)*.1; perf.render+=(performance.now()-tDet-perf.render)*.1;
+  frameMs+=(performance.now()-tProc-frameMs)*.1;
   // a dropped frame or two must not restart the smoothing (the lens would pop when the face comes back)
   if(found) lastFoundT=t; else if(t-lastFoundT>250) resetFilters();
-  $("hint").textContent = found ? "Tracking. Pick a lens on the right." : "No face found. Face the camera with your eyes visible.";
+  $("hint").textContent = found ? (NARROW()?"Tracking. Pick a lens below.":"Tracking. Pick a lens on the right.") : "No face found. Face the camera with your eyes visible.";
   if(lastT){ const f=1000/(t-lastT); fpsAvg=fpsAvg?fpsAvg*.9+f*.1:f; fpsEl.textContent=fpsAvg.toFixed(0)+" fps"+(segs?` · eye model ${segMs.toFixed(0)} ms`:""); }
   lastT=t;
   if(rec) recordFrame(t, performance.now()-tProc, found);
@@ -1146,8 +1186,36 @@ $("snapBtn").onclick=()=>{
   const c=document.createElement("canvas"); c.width=out.width; c.height=out.height; const x=c.getContext("2d");
   if(mirrored){ x.translate(c.width,0); x.scale(-1,1); }
   x.drawImage(out,0,0);
-  const a=document.createElement("a"); a.href=c.toDataURL("image/png"); a.download="lens-tryon.png"; a.click();
+  c.toBlob(async blob=>{
+    const file=new File([blob],"lens-tryon.png",{type:"image/png"});
+    if(IS_PHONE && navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file],title:"Lens try-on"}); return; }catch(e){ if(e.name==="AbortError") return; }
+    }
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="lens-tryon.png"; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  },"image/png");
 };
+
+/* ---------------- Phone: keep the screen awake while the camera runs; phone layout ---------------- */
+let wakeLock=null;
+async function keepAwake(on){
+  try{ if(on && "wakeLock" in navigator && !wakeLock){ wakeLock=await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release",()=>{wakeLock=null;}); }
+       if(!on && wakeLock){ await wakeLock.release(); wakeLock=null; } }catch{}
+}
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible" && stream) keepAwake(true); });
+function phoneLayout(){
+  if(!NARROW() || $("mobileLenses")) return;
+  // lens choices directly under the camera view, so you see your eyes while picking a colour
+  const lensBlock=$("swatches").parentElement, wrap=document.createElement("div");
+  wrap.id="mobileLenses"; wrap.className="mobile-lenses";
+  const stagebar=document.querySelector(".stagebar"); stagebar.parentElement.insertBefore(wrap, stagebar);
+  wrap.appendChild(lensBlock);
+  // sliders + view toggles folded away by default
+  const aside=document.querySelector("aside"), blocks=[...aside.children].filter(el=>el.querySelector&&(el.querySelector("#intensity")||el.querySelector("#eyeModel")));
+  const det=document.createElement("details"); det.className="more"; det.innerHTML="<summary>Fine-tune lens</summary>";
+  aside.insertBefore(det, aside.firstChild); blocks.forEach(b=>det.appendChild(b));
+}
+phoneLayout();
 
 init();
 </script>
