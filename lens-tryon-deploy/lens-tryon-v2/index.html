@@ -166,12 +166,15 @@
       <div class="ctl"><label>Intensity <b id="v_intensity"></b></label><input type="range" id="intensity" min="0" max="1" step="0.01" value="0.85"></div>
       <div class="ctl"><label>Lens diameter <b id="v_size"></b></label><input type="range" id="size" min="0.85" max="1.25" step="0.01" value="1.04"></div>
       <div class="ctl"><label>Pupil opening (manual) <b id="v_pupil"></b></label><input type="range" id="pupil" min="0.18" max="0.55" step="0.01" value="0.34"></div>
-      <div class="ctl"><label>Keep natural iris texture <b id="v_texture"></b></label><input type="range" id="texture" min="0" max="1" step="0.01" value="0.55"></div>
-      <div class="ctl"><label>Limbal ring <b id="v_limbal"></b></label><input type="range" id="limbal" min="0" max="1" step="0.01" value="0.6"></div>
+      <div class="ctl"><label>Keep natural iris texture <b id="v_texture"></b></label><input type="range" id="texture" min="0" max="1" step="0.01" value="0.85"></div>
+      <div class="ctl"><label>Clear zone around pupil <b id="v_zone"></b></label><input type="range" id="zone" min="0" max="0.7" step="0.01" value="0.46"></div>
+      <div class="ctl"><label>Printed-dot pattern <b id="v_print"></b></label><input type="range" id="print" min="0" max="1" step="0.01" value="0.35"></div>
+      <div class="ctl"><label>Limbal ring <b id="v_limbal"></b></label><input type="range" id="limbal" min="0" max="1" step="0.01" value="0.7"></div>
     </div>
 
     <div>
       <h3>View</h3>
+      <div class="toggle">AI eye model (fingers, blinks, lids) <input type="checkbox" id="eyeModel" checked></div>
       <div class="toggle">Auto-fit pupil to your eye <input type="checkbox" id="autoPupil" checked></div>
       <div class="toggle">Before / after split <input type="checkbox" id="compare"></div>
       <div class="toggle">Show tracking overlay <input type="checkbox" id="debug"></div>
@@ -226,15 +229,15 @@ const CORNERS_A = [33,133], CORNERS_B = [263,362];
 const IRIS_1 = [468,469,470,471,472], IRIS_2 = [473,474,475,476,477];               // center + 4 contour pts
 
 /* ---------------- Settings ---------------- */
-const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare:false, debug:false, keyWhite:true, autoPupil:true, split:.5 };
-["intensity","size","pupil","texture","limbal"].forEach(k=>{
+const S = { zone:.46, print:.35, intensity:.85, size:1.04, pupil:.34, texture:.85, limbal:.7, compare:false, debug:false, keyWhite:true, autoPupil:true, eyeModel:true, split:.5 };
+["intensity","size","pupil","texture","limbal","print","zone"].forEach(k=>{
   const el=$(k), v=$("v_"+k);
   const show=()=>{ v.textContent = (+el.value).toFixed(2); };
   show();
-  el.addEventListener("input",()=>{ S[k]=+el.value; show(); if(k==="limbal") rebuildLens(); requestStill(); });
+  el.addEventListener("input",()=>{ S[k]=+el.value; show(); if(k==="limbal"||k==="print") rebuildLens(); requestStill(); });
 });
-["compare","debug","keyWhite","autoPupil"].forEach(k=>$(k).addEventListener("change",e=>{
-  S[k]=e.target.checked; if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
+["compare","debug","keyWhite","autoPupil","eyeModel"].forEach(k=>$(k).addEventListener("change",e=>{
+  S[k]=e.target.checked; if(k==="eyeModel"){ resetFilters(); if(still) refreshStillSeg(); } if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
 }));
 
 /* ---------------- Procedural lens textures ---------------- */
@@ -281,7 +284,9 @@ function makeProcedural(p, limbal){
     R=mix(R,p.ring[0],ring); G=mix(G,p.ring[1],ring); B=mix(B,p.ring[2],ring);
     const speck=.94+.12*r();
     data[o]=R*speck; data[o+1]=G*speck; data[o+2]=B*speck;
-    data[o+3]=255*p.opacity*(p.fx?1:(.82+.18*fib));
+    const dots = smooth(.25,.75, pnoise(T4, t*3+rn*1.7)*.5 + pnoise(T2, t*2-rn*2.3)*.5);
+    const pr = (typeof S!=='undefined' && S.print!=null) ? S.print : .35;
+    data[o+3]=255*p.opacity*(p.fx?1:(.82+.18*fib)*(1-pr+pr*dots));
   }
   return data;
 }
@@ -321,6 +326,7 @@ function renderSwatches(){
 }
 function markActive(el){ sw.querySelectorAll(".sw").forEach(e=>e.classList.remove("active")); el.classList.add("active"); }
 renderSwatches(); rebuildLens();
+window.__S=S; window.__setPreset=i=>{ currentPreset=i; rebuildLens(); renderSwatches(); requestStill(); };   // test hook
 
 /* custom lens upload */
 function buildCustomLens(img){
@@ -354,32 +360,43 @@ $("lensIn").addEventListener("change",e=>{
 });
 
 /* ---------------- One-Euro filter for jitter-free tracking ---------------- */
-class OneEuro{ constructor(minCutoff=1.2,beta=.04,dCutoff=1){Object.assign(this,{minCutoff,beta,dCutoff,x:null,dx:0,t:null});}
+class OneEuro{ constructor(minCutoff=1.2,beta=.04,dCutoff=1,snap=null){Object.assign(this,{minCutoff,beta,dCutoff,snap,x:null,dx:0,t:null});}
   alpha(c,dt){const tau=1/(2*Math.PI*c);return 1/(1+tau/dt);}
   f(v,t,scale=1){ if(this.x===null){this.x=v;this.t=t;return v;} const dt=Math.max(1e-3,(t-this.t)/1000); this.t=t;
     const dv=(v-this.x)/dt/scale; this.dx=this.dx+this.alpha(this.dCutoff,dt)*(dv-this.dx);
-    const c=this.minCutoff+this.beta*Math.abs(this.dx); this.x=this.x+this.alpha(c,dt)*(v-this.x); return this.x; }
+    const c=this.minCutoff+this.beta*Math.abs(this.dx); let a=this.alpha(c,dt);
+    // snap: a jump clearly bigger than tracking noise is real motion → follow it in this very frame (no catch-up lag)
+    if(this.snap){ const dev=Math.abs(v-this.x)/scale; a=Math.max(a, smooth(this.snap[0],this.snap[1],dev)); }
+    this.x=this.x+a*(v-this.x); return this.x; }
   reset(){this.x=null;} }
 // low smoothing at rest (no jitter), almost none during fast motion (no lag)
 // speeds are measured in iris radii per second: tracker noise (~1 r/s) gets heavy smoothing,
 // real head motion (5–30 r/s) opens the filter up so the lens doesn't lag
-const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(1,.4),uy:new OneEuro(1,.4),
+// tuned on a real head-shake recording: lens-to-pupil offset in motion 0.24 → 0.06 iris radii, no extra jitter at rest.
+// A fast derivative cutoff (md/pd/gd) lets the filter notice head motion within a frame or two instead of ~300 ms.
+const FP=Object.assign({mc:2.5,mb:2.5,md:5, gc:.7,gb:8,gd:4, uc:1,ub:1,ud:4, pc:1,pb:2.5,pd:5},
+  (()=>{try{return JSON.parse(new URLSearchParams(location.search).get('fp')||'{}')}catch(e){return {}}})());
+const SNAP=FP.snap===0?null:[FP.s0??.04, FP.s1??.14];   // in iris radii; tracker noise at rest is ~0.002–0.02
+const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(FP.uc,FP.ub,FP.ud),uy:new OneEuro(FP.uc,FP.ub,FP.ud),
   pr:new OneEuro(.15,.02),op:new OneEuro(4,.5),ratio:new OneEuro(.2,0),
   // eye-anchored placement: corners follow the head fast; the iris position *inside* the eye is smoothed hard
-  mx:new OneEuro(1.5,.8,.6), my:new OneEuro(1.5,.8,.6), ew:new OneEuro(1,.5,.6), gu:new OneEuro(.7,4), gv:new OneEuro(.7,4)}));
+  mx:new OneEuro(FP.mc,FP.mb,FP.md,SNAP), my:new OneEuro(FP.mc,FP.mb,FP.md,SNAP), ew:new OneEuro(1,.5,FP.md), gu:new OneEuro(FP.gc,FP.gb,FP.gd), gv:new OneEuro(FP.gc,FP.gb,FP.gd)}));
 const ratioRaw=[null,null];
 const irisModel=[null,null], eyeVis=[1,1], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
-const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(1,.8,.6),new OneEuro(1,.8,.6)]));
-const PUPIL_PRIOR=.4;                                            // typical indoor pupil/iris ratio
+const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(FP.pc,FP.pb,FP.pd,SNAP),new OneEuro(FP.pc,FP.pb,FP.pd,SNAP)]));
+const PUPIL_PRIOR=.4;
+const BLINK_KEY=(()=>{ const q=new URLSearchParams(location.search).get('blinkSwap'); return q?['eyeBlinkRight','eyeBlinkLeft']:['eyeBlinkLeft','eyeBlinkRight']; })();   // [image-right eye, image-left eye]                                            // typical indoor pupil/iris ratio
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
 const resetFilters=()=>{ filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
   pupilRaw[0]=pupilRaw[1]=null; ratioRaw[0]=ratioRaw[1]=null; pupilMem[0]=pupilMem[1]=null; pupilShown[0]=pupilShown[1]=null; offMem[0]=offMem[1]=null; statMem[0]={}; statMem[1]={};
   eyeVis[0]=eyeVis[1]=1; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; };          // irisModel survives brief tracking loss
 
 /* ---------------- Eye geometry ---------------- */
-function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
+function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter, seg){
   const P=i=>[lm[i].x*W, lm[i].y*H];
-  const c=P(irisIdx[0]), p1=P(irisIdx[1]), p2=P(irisIdx[2]), p3=P(irisIdx[3]), p4=P(irisIdx[4]);
+  let c=P(irisIdx[0]); const p1=P(irisIdx[1]), p2=P(irisIdx[2]), p3=P(irisIdx[3]), p4=P(irisIdx[4]);
+  // the model's iris centre is found from the eye pixels themselves: a finger covering part of the iris doesn't drag it
+  if(seg && seg.present>.5) c=[seg.cx, seg.cy];
   const k0=P(cornerIdx[0]), k1=P(cornerIdx[1]);
   let ux=k0[0]-k1[0], uy=k0[1]-k1[1]; const ul=Math.hypot(ux,uy)||1; ux/=ul; uy/=ul;
   if(ux<0){ux=-ux;uy=-uy;}                                      // consistent orientation for both eyes
@@ -407,7 +424,7 @@ function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
   });
   const top=P(eyeIdx[4]), bot=P(eyeIdx[12]);
   let open=Math.hypot(top[0]-bot[0],top[1]-bot[1]) / ul;          // ~0.3 open, <0.1 closed
-  let g={cx:c[0],cy:c[1],rawx:c[0],rawy:c[1],rx,ry,ux,uy,poly,slot,t,useFilter};
+  let g={cx:c[0],cy:c[1],rawx:c[0],rawy:c[1],rx,ry,ux,uy,poly,slot,t,useFilter,seg};
   if(useFilter){ const f=filt[slot];
     // where the iris sits inside the eye, in eye-width units along the eye axes (u = corner→corner, v = down)
     const mx0=(k0[0]+k1[0])/2, my0=(k0[1]+k1[1])/2;
@@ -424,6 +441,69 @@ function eyeGeometry(lm, W, H, eyeIdx, cornerIdx, irisIdx, slot, t, useFilter){
     g.poly=poly.map((p,k)=>[polyFilt[slot][k][0].f(p[0],t,scP), polyFilt[slot][k][1].f(p[1],t,scP)]); }
   g.open=open;
   return g;
+}
+
+/* ---------------- Eye segmentation model (trained on our recordings; see eyeseg/) ----------------
+   Per eye: an upright 128x64 crop centred on the eye corners (same geometry as training), then one ONNX call for
+   both eyes. Output per pixel: skin, sclera, iris, pupil, occluder (finger/hand/object) + the full iris circle.
+   The lens is drawn only where the model sees visible iris, and centred on the model's iris circle — so fingers,
+   lids, lashes and blinks are handled by the model instead of colour heuristics. */
+const SEG_W=128, SEG_H=64, SEG_SPAN=2.2;
+const segCv=document.createElement("canvas"); segCv.width=SEG_W; segCv.height=SEG_H*2;
+const segCtx=segCv.getContext("2d",{willReadFrequently:true});
+let segSession=null, ortMod=null, segBusy=false, segMs=0, segEP="";
+async function loadEyeModel(){
+  if(new URLSearchParams(location.search).get("eyemodel")==="0"){ S.eyeModel=false; $("eyeModel").checked=false; return; }
+  try{
+    ortMod = await import("./ort.wasm.min.mjs");
+    const ort = ortMod.default || ortMod;
+    ort.env.wasm.wasmPaths = new URL(".", location.href).href;
+    ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency||2) : 1;
+    segSession = await ort.InferenceSession.create("./eyeseg.onnx", {executionProviders:["wasm"], graphOptimizationLevel:"all"});
+    segEP="wasm";
+    await runEyeSeg(null);                                            // warm-up: first call compiles kernels
+  }catch(e){ console.warn("eye model unavailable, using the classic pipeline:", e); segSession=null;
+    $("eyeModel").checked=false; $("eyeModel").disabled=true; S.eyeModel=false; }
+}
+// image -> crop affine for one eye: [a,b,c,d,e,f] with u=a*x+c*y+e, v=b*x+d*y+f (canvas setTransform order)
+function eyeAffine(lm, W, H, cornerIdx, row){
+  let A=[lm[cornerIdx[0]].x*W, lm[cornerIdx[0]].y*H], B=[lm[cornerIdx[1]].x*W, lm[cornerIdx[1]].y*H];
+  if(A[0]>B[0]){ const t=A; A=B; B=t; }
+  const cx=(A[0]+B[0])/2, cy=(A[1]+B[1])/2, ew=Math.max(1,Math.hypot(B[0]-A[0],B[1]-A[1])), th=Math.atan2(B[1]-A[1],B[0]-A[0]);
+  const sc=SEG_W/(SEG_SPAN*ew), a=sc*Math.cos(th), b=-sc*Math.sin(th), c=sc*Math.sin(th), d=sc*Math.cos(th);
+  return {a,b,c,d,e:SEG_W/2-(a*cx+c*cy), f:SEG_H/2+row*SEG_H-(b*cx+d*cy), sc, row};
+}
+// returns [eyeA, eyeB] results or null. `lm` null = warm-up on a blank image.
+async function runEyeSeg(source, lm, W, H){
+  if(!segSession) return null;
+  const ort=ortMod.default||ortMod, t0=performance.now();
+  const aff = lm ? [eyeAffine(lm,W,H,CORNERS_A,0), eyeAffine(lm,W,H,CORNERS_B,1)] : null;
+  segCtx.setTransform(1,0,0,1,0,0); segCtx.fillStyle="#000"; segCtx.fillRect(0,0,SEG_W,SEG_H*2);
+  if(aff){ segCtx.imageSmoothingEnabled=true; segCtx.imageSmoothingQuality="high";
+    for(const m of aff){ segCtx.save(); segCtx.beginPath(); segCtx.rect(0,m.row*SEG_H,SEG_W,SEG_H); segCtx.clip();
+      segCtx.setTransform(m.a,m.b,m.c,m.d,m.e,m.f); segCtx.drawImage(source,0,0,W,H); segCtx.restore(); } }
+  const px=segCtx.getImageData(0,0,SEG_W,SEG_H*2).data, N=SEG_W*SEG_H, x=new Float32Array(2*3*N);
+  for(let k=0;k<2;k++) for(let i=0;i<N;i++){ const o=(k*N+i)*4, base=k*3*N;
+    x[base+i]=px[o]/255; x[base+N+i]=px[o+1]/255; x[base+2*N+i]=px[o+2]/255; }
+  const out=await segSession.run({crop:new ort.Tensor("float32",x,[2,3,SEG_H,SEG_W])});
+  const seg=out.seg.data, circ=out.circle.data;
+  segMs+= (performance.now()-t0-segMs)*.1;
+  if(!aff) return null;
+  return aff.map((m,k)=>{
+    const iris=new Float32Array(N), occ=new Float32Array(N), base=k*5*N; let nIris=0;
+    for(let i=0;i<N;i++){ const v=seg[base+2*N+i]+seg[base+3*N+i]; iris[i]=v; occ[i]=seg[base+4*N+i]; if(v>.5) nIris++; }
+    // circle back to image pixels (inverse of the affine)
+    const u=circ[k*4]*SEG_W, v=circ[k*4+1]*SEG_H+m.row*SEG_H, r=circ[k*4+2]*SEG_W, det=m.a*m.d-m.b*m.c;
+    const du=u-m.e, dv=v-m.f, X=(m.d*du-m.c*dv)/det, Y=(-m.b*du+m.a*dv)/det;
+    return {m, iris, occ, nIris, cx:X, cy:Y, r:r/m.sc, present:circ[k*4+3]};
+  });
+}
+// probability that image pixel (X,Y) is visible iris/pupil, bilinear in the crop
+function segIrisAt(s, X, Y){
+  const m=s.m, u=m.a*X+m.c*Y+m.e-.5, v=m.b*X+m.d*Y+m.f-m.row*SEG_H-.5;
+  if(u<0||v<0||u>=SEG_W-1||v>=SEG_H-1) return 0;
+  const iu=u|0, iv=v|0, fu=u-iu, fv=v-iv, o=iv*SEG_W+iu, I=s.iris;
+  return (I[o]*(1-fu)+I[o+1]*fu)*(1-fv)+(I[o+SEG_W]*(1-fu)+I[o+SEG_W+1]*fu)*fv;
 }
 
 /* ---------------- Lens compositing (per eye, on a small crop) ---------------- */
@@ -457,7 +537,10 @@ function boxBlur(src, tmp, w, h, r){                             // separable bo
     for(let y=0;y<h;y++){ src[y*w+x]=acc*k; acc+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.max(0,y-r)*w+x]; } }
 }
 function applyLens(g, W, H){
-  const openFade=smooth(.08,.16,g.open);                        // fade out while blinking / heavy squint
+  const SEG=g.seg||null;
+  // with the eye model, lids / blinks / fingers are in its mask; without it, fall back to landmarks + blendshapes
+  const openFade = SEG ? 1 : smooth(.08,.16,g.open)*(1-smooth(.38,.58,g.blink||0));
+  if(SEG && SEG.nIris<6) return;                                  // closed eye, hand over the eye: nothing to colour
   if(openFade<=0.01 || g.rx < 2.5) return;
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   for(const p of g.poly){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
@@ -495,7 +578,17 @@ function applyLens(g, W, H){
   }
   // The iris colour comes from the ring's typical pixels only: window/softbox reflections and stray lashes
   // would otherwise drag the reference off, and the "looks like this iris" test below then rejects real iris.
-  if(ring.length>4){
+  const mdl0 = g.useFilter ? irisModel[g.slot] : null; let ringFrac=1;
+  if(mdl0 && ring.length>4){
+    // a finger or hand over part of the iris must not decide for the whole eye: keep only ring pixels that still
+    // match the learned iris (dark enough, right hue) and judge visibility by how many of them are left
+    let m=0;
+    for(const o of ring){ const L=lum(o); if(L>mdl0.L*1.9 || L<mdl0.L*.35) continue;
+      const sm=d[o]+d[o+1]+d[o+2]+3, cd=Math.abs(d[o]/sm-mdl0.c[0])+Math.abs(d[o+1]/sm-mdl0.c[1])+Math.abs(d[o+2]/sm-mdl0.c[2]);
+      if(cd>(mdl0.L<.15?.2:.14)) continue;
+      iS+=L; iN++; iR+=d[o]; iG+=d[o+1]; iB+=d[o+2]; m++; }
+    ringFrac=m/ring.length;
+  } else if(ring.length>4){
     let acc=0, med=.3, q1=0; const half=ring.length*.5, quarter=ring.length*.2;
     for(let b=0, gotQ=false;b<64;b++){ acc+=ringHist[b]; if(!gotQ && acc>=quarter){ q1=b/64; gotQ=true; } if(acc>=half){ med=(b+.5)/64; break; } }
     const hiT=med*1.5+.04, loT=q1*.5;
@@ -516,6 +609,7 @@ function applyLens(g, W, H){
     const cd=Math.abs(curC[0]-model.c[0])+Math.abs(curC[1]-model.c[1])+Math.abs(curC[2]-model.c[2]);
     const lr=irisL/model.L;
     matchOK = lr<1.85 && lr>.4 && cd<(model.L<.15?.18:.13);         // a hand reads ~3x brighter: wide margin
+    if(mdl0) matchOK = matchOK && (ringFrac>.12 || iN>=12);          // part of the iris still visible → show that part (the pixel gate hides the rest)
   }
   const eyeOK = iN>4 && (model ? (matchOK && (contrastOK || !sk)) : contrastOK);
   if(g.useFilter){
@@ -525,15 +619,16 @@ function applyLens(g, W, H){
     const speed = la ? Math.hypot(g.cx-la[0],g.cy-la[1])/Math.max(1,g.rx)/dt : 0;
     const tau=eyeOK?.12:.04;                                        // hide in ~40 ms, fade back in over ~120 ms
     if(eyeOK || speed<8) eyeVis[g.slot] += ((eyeOK?1:0) - eyeVis[g.slot]) * (1-Math.exp(-dt/tau));
-    if(eyeOK && contrastOK && g.open>.18 && curC){                      // learn the iris slowly, only from clean frames
+    if(eyeOK && contrastOK && g.open>.18 && curC && ringFrac>.6 && (g.blink||0)<.3){                      // learn the iris slowly, only from clean frames
       if(!model) irisModel[g.slot]=model={L:irisL, c:curC};
       else { model.L+=(irisL-model.L)*.03; model.c=model.c.map((v,j)=>v+(curC[j]-v)*.03); }
     }
   } else {
-    if(!eyeOK) return;
+    if(!eyeOK && !SEG) return;
     model={L:irisL, c:curC||[.4,.33,.27]};                           // photos: use this frame's own iris
   }
-  const occl = g.useFilter ? eyeVis[g.slot] : 1;
+  if(!model) model={L:irisL, c:curC||[.4,.33,.27]};
+  const occl = SEG ? 1 : (g.useFilter ? eyeVis[g.slot] : 1);
   g.dbg={vis:+occl.toFixed(2), irisL:+irisL.toFixed(3), skL:+skL.toFixed(3), mL:model?+model.L.toFixed(3):null, contrastOK, matchOK, iN};
   if(occl<.02) return;
   let ox=0, oy=0, pupilEst=null, pupilRGB=[22,20,20], seen=false;
@@ -637,15 +732,19 @@ function applyLens(g, W, H){
 
   // pass 2b: composite
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-    const i=y*w+x, lid=mask[i*4+3]/255; if(lid<=0.004) continue;
+    const i=y*w+x, lid = SEG ? 1 : mask[i*4+3]/255; if(lid<=0.004) continue;
     const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
     const a=(dx*ux+dy*uy)/rx, b=(-dx*uy+dy*ux)/ry, rn=Math.hypot(a,b);
     if(rn>=1) continue;
     const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=L0[i];
-    const vis=lid*smooth(.3,.7,gateMap[i])*openFade*occl;
+    const vis = SEG ? smooth(.25,.75,segIrisAt(SEG,x+x0+.5,y+y0+.5)) : lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
-    const pin=smooth(pupil-.02,pupil+.06,rn);                   // crisp pupil edge like a printed lens
+    // printed zone: real colour lenses leave a clear ring around the pupil and their print starts with a feathered,
+    // starburst edge, so a little natural iris always shows around the pupil
+    const th=Math.atan2(b,a), burst=.5+.22*Math.sin(th*23+1.3)+.18*Math.sin(th*41+.7)+.1*Math.sin(th*67+2.1);
+    const ri=Math.max(pupil+.05, S.zone)+(burst-.5)*.12*(S.zone>pupil+.06?1:0);
+    const pin=smooth(pupil-.02,pupil+.05,rn)*smooth(ri-.05,ri+.05,rn);
     let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.95,1,rn))*pin;    // cover the iris right out to the limbus
     let sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=1+(sh-1)*S.texture;  // natural shading; capped so sclera/skin can't brighten it
     // upper-lid shadow: the lid and lashes shade the top of a real iris
@@ -675,8 +774,10 @@ function drawDebug(g){
 }
 
 /* ---------------- Frame processing ---------------- */
+let lastBlend=null; const blinkF=[0,0];
 let landmarker=null, mode=null, still=null, stillLm=null, mirrored=false;
-function processFrame(source, W, H, lmList, t, useFilter){
+function processFrame(source, W, H, lmList, t, useFilter, segs){
+  if(!S.eyeModel) segs=null;
   ctx.drawImage(source,0,0,W,H);
   const geoms=[];
   if(lmList && lmList.length && lensTex){
@@ -685,8 +786,17 @@ function processFrame(source, W, H, lmList, t, useFilter){
     const cA=[lm[EYE_A[0]].x+lm[EYE_A[8]].x, lm[EYE_A[0]].y+lm[EYE_A[8]].y];
     const d1=Math.hypot(lm[468].x*2-cA[0], lm[468].y*2-cA[1]), d2=Math.hypot(lm[473].x*2-cA[0], lm[473].y*2-cA[1]);
     const [iA,iB]= d1<d2 ? [IRIS_1,IRIS_2] : [IRIS_2,IRIS_1];
-    geoms.push(eyeGeometry(lm,W,H,EYE_A,CORNERS_A,iA,0,t,useFilter));
-    geoms.push(eyeGeometry(lm,W,H,EYE_B,CORNERS_B,iB,1,t,useFilter));
+    geoms.push(eyeGeometry(lm,W,H,EYE_A,CORNERS_A,iA,0,t,useFilter,segs&&segs[0]));
+    geoms.push(eyeGeometry(lm,W,H,EYE_B,CORNERS_B,iB,1,t,useFilter,segs&&segs[1]));
+    // per-eye blink from the face model's blendshapes: far more reliable on a wink than lid landmarks, which
+    // move both eyes together and lag the real lid. The subject's left eye is the one further right in the camera image.
+    geoms.forEach(g=>g.blink=0);
+    if(useFilter && lastBlend){
+      const sc=n=>{ const c=lastBlend.find(c=>c.categoryName===n); return c?c.score:0; };
+      const rightOnImage = geoms[0].cx>geoms[1].cx ? 0 : 1;
+      const raw=[0,0]; raw[rightOnImage]=sc(BLINK_KEY[0]); raw[1-rightOnImage]=sc(BLINK_KEY[1]);
+      for(const g of geoms){ const v=raw[g.slot]; blinkF[g.slot]+= (v-blinkF[g.slot])*(v>blinkF[g.slot]?.85:.5); g.blink=blinkF[g.slot]; }   // close fast, reopen a touch slower
+    }
     geoms.forEach(g=>applyLens(g,W,H));
   }
   if(S.compare){
@@ -694,7 +804,7 @@ function processFrame(source, W, H, lmList, t, useFilter){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
@@ -748,7 +858,7 @@ async function createLandmarker(model){
     for(const d of delegateOrder()){
       try{
         const lmk=await FaceLandmarker.createFromOptions(fs,{ baseOptions:{ modelAssetBuffer:model, delegate:d },
-          runningMode:"VIDEO", numFaces:1, minFaceDetectionConfidence:.5, minFacePresenceConfidence:.5, minTrackingConfidence:.5 });
+          runningMode:"VIDEO", numFaces:1, outputFaceBlendshapes:true, minFaceDetectionConfidence:.5, minFacePresenceConfidence:.5, minTrackingConfidence:.5 });
         delegateUsed=d; perf.delegate=d; return lmk;
       }catch(e){ console.warn(d+" delegate failed:", e); lastErr=new Error(d+" init failed: "+(e.message||e)); }
     }
@@ -765,7 +875,9 @@ async function init(localModel){
     setStatus("Starting model…");
     landmarker = await createLandmarker(model);
     mode="VIDEO";
-    setStatus("Model ready","ok"); statusEl.title="";
+    setStatus("Loading eye model…");
+    await loadEyeModel();
+    setStatus(segSession ? "Model ready · eye AI on" : "Model ready","ok"); statusEl.title="";
     $("camBtn").disabled=false; $("camBtn2").disabled=false; $("modelPick").style.display="none";
     $("hint").textContent="Tip: look at the camera and keep your eyes open.";
   }catch(e){
@@ -824,9 +936,9 @@ function stopCamera(){
   $("camBtn").textContent="Start camera"; fpsEl.style.display="none"; $("flipBtn").style.display="none";
   if(!still){ $("empty").style.display=""; ctx.clearRect(0,0,out.width,out.height); }
 }
-function loop(){
+async function loop(){
   rafId=requestAnimationFrame(loop);
-  if(video.readyState<2 || video.currentTime===lastVT) return;
+  if(segBusy || video.readyState<2 || video.currentTime===lastVT) return;
   lastVT=video.currentTime;
   const t=performance.now(), tProc=performance.now();
   if(video.videoWidth && (video.videoWidth!==out.width || video.videoHeight!==out.height)){   // phone rotated
@@ -837,12 +949,18 @@ function loop(){
   frameCtx.drawImage(video,0,0,frameCv.width,frameCv.height);
   const res=landmarker.detectForVideo(frameCv,t);
   const tDet=performance.now();
-  const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true);
+  lastBlend=res.faceBlendshapes&&res.faceBlendshapes[0]?res.faceBlendshapes[0].categories:null;
+  let segs=null;
+  if(S.eyeModel && segSession && res.faceLandmarks && res.faceLandmarks.length){
+    segBusy=true; try{ segs=await runEyeSeg(frameCv,res.faceLandmarks[0],out.width,out.height); }catch(e){ console.warn(e); } segBusy=false;
+    if(!stream) return;                                             // camera stopped while the model ran
+  }
+  const found=processFrame(frameCv,out.width,out.height,res.faceLandmarks,t,true,segs);
   perf.detect+=(tDet-tProc-perf.detect)*.1; perf.render+=(performance.now()-tDet-perf.render)*.1;
   // a dropped frame or two must not restart the smoothing (the lens would pop when the face comes back)
   if(found) lastFoundT=t; else if(t-lastFoundT>250) resetFilters();
   $("hint").textContent = found ? "Tracking. Pick a lens on the right." : "No face found. Face the camera with your eyes visible.";
-  if(lastT){ const f=1000/(t-lastT); fpsAvg=fpsAvg?fpsAvg*.9+f*.1:f; fpsEl.textContent=fpsAvg.toFixed(0)+" fps"; }
+  if(lastT){ const f=1000/(t-lastT); fpsAvg=fpsAvg?fpsAvg*.9+f*.1:f; fpsEl.textContent=fpsAvg.toFixed(0)+" fps"+(segs?` · eye model ${segMs.toFixed(0)} ms`:""); }
   lastT=t;
   if(rec) recordFrame(t, performance.now()-tProc, found);
 }
@@ -949,7 +1067,8 @@ async function loadPhoto(f){
   still=c; mirrored=false; out.classList.remove("mirror"); sizeOut(W,H);
   await setMode("IMAGE");
   const res=landmarker.detect(c); stillLm=res.faceLandmarks;
-  resetFilters(); if(stillLm.length){ processFrame(c,W,H,stillLm,0,false); }   // first pass measures both pupils
+  stillSeg=null; if(stillLm.length && S.eyeModel && segSession) stillSeg=await runEyeSeg(c,stillLm[0],W,H);
+  resetFilters(); if(stillLm.length){ processFrame(c,W,H,stillLm,0,false,stillSeg); }   // first pass measures both pupils
   $("empty").style.display="none"; $("snapBtn").disabled=false; updateSplitUI();
   $("hint").textContent = stillLm.length ? "Face found. Try different lenses on the right." : "No face found. Try a clearer, front-facing photo.";
   requestStill();
@@ -957,8 +1076,10 @@ async function loadPhoto(f){
 let stillPending=false;
 function requestStill(){
   if(!still || stream || stillPending) return; stillPending=true;
-  requestAnimationFrame(()=>{ stillPending=false; processFrame(still,still.width,still.height,stillLm,0,false); });
+  requestAnimationFrame(()=>{ stillPending=false; processFrame(still,still.width,still.height,stillLm,0,false,stillSeg); });
 }
+let stillSeg=null;
+async function refreshStillSeg(){ stillSeg = (still && stillLm && stillLm.length && segSession) ? await runEyeSeg(still,stillLm[0],still.width,still.height) : null; requestStill(); }
 
 /* ---------------- Before/after split ---------------- */
 const split=$("split");
