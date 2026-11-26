@@ -490,12 +490,16 @@ async function runEyeSeg(source, lm, W, H){
   segMs+= (performance.now()-t0-segMs)*.1;
   if(!aff) return null;
   return aff.map((m,k)=>{
-    const iris=new Float32Array(N), occ=new Float32Array(N), base=k*5*N; let nIris=0;
-    for(let i=0;i<N;i++){ const v=seg[base+2*N+i]+seg[base+3*N+i]; iris[i]=v; occ[i]=seg[base+4*N+i]; if(v>.5) nIris++; }
+    const iris=new Float32Array(N), occ=new Float32Array(N), base=k*5*N; let nIris=0, nOccIn=0;
+    const uc=circ[k*4]*SEG_W, vc=circ[k*4+1]*SEG_H, rc=Math.max(1,circ[k*4+2]*SEG_W);
+    for(let i=0;i<N;i++){ const v=seg[base+2*N+i]+seg[base+3*N+i]; iris[i]=v; occ[i]=seg[base+4*N+i]; if(v>.5) nIris++;
+      if(occ[i]>.5){ const du=(i%SEG_W)+.5-uc, dv=((i/SEG_W)|0)+.5-vc; if(du*du+dv*dv<rc*rc) nOccIn++; } }
+    // share of the iris disc that is visible, not counting parts hidden by a finger/hand: lids closing -> small
+    const visFrac=nIris/Math.max(1,Math.PI*rc*rc-nOccIn);
     // circle back to image pixels (inverse of the affine)
     const u=circ[k*4]*SEG_W, v=circ[k*4+1]*SEG_H+m.row*SEG_H, r=circ[k*4+2]*SEG_W, det=m.a*m.d-m.b*m.c;
     const du=u-m.e, dv=v-m.f, X=(m.d*du-m.c*dv)/det, Y=(-m.b*du+m.a*dv)/det;
-    return {m, iris, occ, nIris, cx:X, cy:Y, r:r/m.sc, present:circ[k*4+3]};
+    return {m, iris, occ, nIris, visFrac, cx:X, cy:Y, r:r/m.sc, present:circ[k*4+3]};
   });
 }
 // probability that image pixel (X,Y) is visible iris/pupil, bilinear in the crop
@@ -539,7 +543,11 @@ function boxBlur(src, tmp, w, h, r){                             // separable bo
 function applyLens(g, W, H){
   const SEG=g.seg||null;
   // with the eye model, lids / blinks / fingers are in its mask; without it, fall back to landmarks + blendshapes
-  const openFade = SEG ? 1 : smooth(.08,.16,g.open)*(1-smooth(.38,.58,g.blink||0));
+  // with the model: still fade on the per-eye blink score (the model has seen few half-closed eyes, and dark lashes on a
+  // closing lid can look like iris to it). Without: landmarks + blendshapes as before.
+  // ...and on how much of the iris the lids still leave visible (a closing eye shows a thin slit of lashes)
+  const openFade = SEG ? Math.min(1-smooth(.35,.6,g.blink||0), smooth(.18,.38,SEG.visFrac))
+                       : smooth(.08,.16,g.open)*(1-smooth(.38,.58,g.blink||0));
   if(SEG && SEG.nIris<6) return;                                  // closed eye, hand over the eye: nothing to colour
   if(openFade<=0.01 || g.rx < 2.5) return;
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
@@ -732,12 +740,12 @@ function applyLens(g, W, H){
 
   // pass 2b: composite
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-    const i=y*w+x, lid = SEG ? 1 : mask[i*4+3]/255; if(lid<=0.004) continue;
+    const i=y*w+x, lid=mask[i*4+3]/255; if(lid<=0.004) continue;    // eyelid outline always clips (lashes, closing lids)
     const dx=x+x0+.5-cx, dy=y+y0+.5-cy;
     const a=(dx*ux+dy*uy)/rx, b=(-dx*uy+dy*ux)/ry, rn=Math.hypot(a,b);
     if(rn>=1) continue;
     const o=i*4, R=d[o],G=d[o+1],B=d[o+2], L=L0[i];
-    const vis = SEG ? smooth(.25,.75,segIrisAt(SEG,x+x0+.5,y+y0+.5)) : lid*smooth(.3,.7,gateMap[i])*openFade*occl;
+    const vis = SEG ? lid*smooth(.25,.75,segIrisAt(SEG,x+x0+.5,y+y0+.5))*openFade : lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
     // printed zone: real colour lenses leave a clear ring around the pupil and their print starts with a feathered,
@@ -804,7 +812,7 @@ function processFrame(source, W, H, lmList, t, useFilter, segs){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink,visFrac:g.seg?g.seg.visFrac:null}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
