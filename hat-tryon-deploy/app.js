@@ -1,8 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=d05c35f";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=d05c35f";
+import { HATS, A, B } from "./hats.js?v=69ff787";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=69ff787";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -38,7 +38,7 @@ const statusEl = $("status"), fpsEl = $("fps");
 const setStatus = (t, cls = "") => { statusEl.textContent = t; statusEl.className = "pill " + cls; };
 
 /* ---------------- Settings ---------------- */
-const S = { bright: 1, shadow: 0.6, occlude: true, headShape: true, debug: false, keyBg: true, tol: 38, tuck: 0, showOrig: false };
+const S = { bright: 1, shadow: 0.6, occlude: true, headShape: true, press: true, debug: false, keyBg: true, tol: 38, tuck: 0, showOrig: false };
 const FIT_DEFAULT = { size: 1, y: 0, x: 0, tilt: 0, stretch: 1, curve: 0 };
 const FIT_KEYS = ["size", "y", "x", "tilt", "stretch", "curve"];
 const SIT = -0.08;          // default hat line at the forehead: head widths above (+) the top-of-forehead landmark
@@ -60,9 +60,42 @@ const renderer = new THREE.WebGLRenderer({ canvas: out, antialias: true, alpha: 
 renderer.setPixelRatio(1);
 const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(0, 1, 1, 0, 1, 12000); cam.position.z = 6000;
 let bgTex = null, bgKey = "";
+
 const maskTex = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
 maskTex.minFilter = maskTex.magFilter = THREE.LinearFilter; maskTex.needsUpdate = true;
 const MU = { uMask: { value: maskTex }, uMaskOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uHeadVz: { value: 0 }, uSoft: { value: 1 }, uRim: { value: 0 }, uSlope: { value: 0 }, uLen: { value: 0.3 }, uSide: { value: 0 }, uCrown: { value: 1 }, uSideDrop: { value: 0 }, uSideDropS: { value: 0 }, uMX: { value: new THREE.Vector3(1, 0, 0) }, uGrain: { value: 0.02 }, uSeed: { value: 0 } };
+/* The camera picture is drawn by a full-screen quad, so it can be edited where the hat meets the head:
+   - pressing: above the hat band, hair that would stick out past the hat is pulled in towards the head (a real hat
+     squashes it), so the band can sit on compressed hair instead of perching on the full hair outline;
+   - contact: a soft darkening of hair and forehead just under the band, where the hat touches them.
+   The band is the projected ring of the hat's head opening: its side points, mid, and front point (uFront). */
+const BG = {
+  uTex: { value: null }, uOn: { value: 0 }, uMid: { value: new THREE.Vector2() }, uDir: { value: new THREE.Vector2(1, 0) },
+  uHalf: { value: 1 }, uFront: { value: 0 }, uDelta: { value: 0 }, uW: { value: 1 }, uAO: { value: 0.22 },
+};
+const bgMat = new THREE.ShaderMaterial({
+  uniforms: BG, depthTest: false, depthWrite: false, toneMapped: false,
+  vertexShader: "void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }",
+  fragmentShader: `uniform sampler2D uTex; uniform vec2 uRes, uMid, uDir; uniform float uOn, uHalf, uFront, uDelta, uW, uAO;
+  uniform sampler2D uMask; uniform vec3 uMX; uniform float uMaskOn;
+  float person(vec2 p){ vec2 q = vec2(p.x, uRes.y - p.y) * uMX.x + uMX.yz; return uMaskOn > .5 ? smoothstep(.3, .7, texture2D(uMask, q / uRes).r) : 1.; }
+  void main(){
+    vec2 p = gl_FragCoord.xy, d = p - uMid, up = vec2(-uDir.y, uDir.x);
+    float a = dot(d, uDir) / uW, b = dot(d, up) / uW, h = uHalf / uW, ua = abs(a);
+    float edge = uFront * (1. - min(1., ua * ua / (h * h)));                 // lower edge of the band: lowest at the front
+    float above = smoothstep(-.02, .07, b - edge) * (1. - smoothstep(.9, 1.3, b));
+    float ring = smoothstep(h - .3, h, ua) * (1. - smoothstep(h, h + .4, ua));
+    vec2 src = p + uDir * sign(a) * uDelta * ring * above * uOn;             // show what is further out: the hair edge moves in
+    vec4 c = texture2D(uTex, src / uRes);
+    float under = b - edge;                                                  // just under the band, inside the hat's width
+    float ao = (1. - smoothstep(0., .1, -under)) * step(under, 0.) * (1. - smoothstep(h - .08, h + .04, ua));
+    c.rgb *= 1. - uAO * ao * person(p) * uOn;
+    gl_FragColor = c;
+    #include <colorspace_fragment>
+  }`,
+});
+bgMat.uniforms.uRes = MU.uRes; bgMat.uniforms.uMask = MU.uMask; bgMat.uniforms.uMX = MU.uMX; bgMat.uniforms.uMaskOn = MU.uMaskOn;
+const bgQuad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bgMat); bgQuad.renderOrder = -10; bgQuad.frustumCulled = false;
 const MASK_GLSL = "uniform vec3 uMX; uniform float uSideDropS; uniform sampler2D uMask; uniform float uMaskOn; uniform vec2 uRes; uniform float uHeadVz; uniform float uSoft; uniform float uRim; uniform float uSlope; uniform float uLen; uniform float uSide; uniform float uGrain; uniform float uSeed; varying float vVz; varying float vHy; varying vec3 vP;\n" +
   "float personMask(){ vec2 q = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) * uMX.x + uMX.yz;   // where this pixel was when the mask was made\n" +
   " return smoothstep(.3, .7, texture2D(uMask, q / uRes).r); }\n";
@@ -381,7 +414,7 @@ for (const k of ["bright", "shadow", "tol", "tuck"]) {
     requestStill();
   });
 }
-for (const k of ["occlude", "debug", "keyBg", "headShape"]) $(k).addEventListener("change", e => {
+for (const k of ["occlude", "debug", "keyBg", "headShape", "press"]) $(k).addEventListener("change", e => {
   S[k] = e.target.checked;
   if (k === "keyBg" && customImg) setCustom(customImg, true);
   if (k === "occlude" && still) refreshStill(); else requestStill();
@@ -508,7 +541,8 @@ function hairFit(seg, pose, W, H, smooth) {
 const TOUCH = matchMedia("(pointer: coarse)").matches, PHONE = TOUCH && Math.min(screen.width, screen.height) < 820;
 const PROC_MAX = PHONE ? 480 : 1280;   // longest side of the frame the trackers work on
 const MOVE_TIP = TOUCH ? "drag the hat to move it, pinch to resize" : "drag the hat to move it, scroll to resize";
-const _v = new THREE.Vector3();
+const _v = new THREE.Vector3(), _bl = new THREE.Vector3(), _br = new THREE.Vector3(), _bf = new THREE.Vector3();
+const PRESS = 0.5;   // how much of the hair's thickness a hat squashes at its band
 /* The hat's lowest points across its front (brim or visor edge), in the hat's own coordinates; found once per hat. */
 function frontEdge(h) {
   if (h.frontPts) return h.frontPts;
@@ -542,7 +576,9 @@ function render(source, W, H, pose) {
   if (ovl.width !== W || ovl.height !== H) { ovl.width = W; ovl.height = H; }
   const key = W + "x" + H;
   if (!bgTex || bgKey !== key) { bgTex?.dispose(); bgTex = new THREE.Texture(source); bgTex.colorSpace = THREE.SRGBColorSpace; bgTex.generateMipmaps = false; bgTex.minFilter = bgTex.magFilter = THREE.LinearFilter; bgKey = key; }
-  bgTex.image = source; bgTex.needsUpdate = true; scene.background = bgTex;
+  bgTex.image = source; bgTex.needsUpdate = true; scene.background = null; BG.uTex.value = bgTex;
+  if (bgQuad.parent !== scene) scene.add(bgQuad);
+  bgQuad.scale.set(W, H, 1); bgQuad.position.set(W / 2, H / 2, -5900); BG.uOn.value = 0;
   octx.clearRect(0, 0, W, H);
   headG.visible = !!pose && !S.showOrig && !!hat.group;
   if (pose && hat.group) {
@@ -555,20 +591,23 @@ function render(source, W, H, pose) {
     const zc = pose.fz - HEAD_R[2] * 0.97 * headK.kd, top = pose.h + 0.3 + headK.dTop;
     for (const m of [occluder, catcher, wire]) { m.scale.set(HR[0], HR[1], HR[2]); m.position.set(0, top - HR[1], zc); }
     // the shadow shell is as wide as the hat band, so it reaches the ears and the hair at the sides (the person mask trims it)
-    const bandX = A * hairScale * F.size * (hat.snug || 1);
+    /* pressing: a hat squashes the hair under its band, so the band sits between the bare skull and the full hair
+       outline; the background shader pulls in the hair that would stick out above it */
+    const skullScale = Math.max(0.98, HEAD_R[0] * headK.kx * 1.04 / A), hsR = S.press ? skullScale + Math.max(0, hairScale - skullScale) * (1 - PRESS) : hairScale;
+    const bandX = A * hsR * F.size * (hat.snug || 1);
     catcher.scale.x = Math.max(HR[0], bandX * 1.02);
     occluder.visible = S.occlude; wire.visible = S.debug;
     if (hat.group.parent !== hatPivot) { hatPivot.clear(); hatPivot.add(hat.group); }
     const tb0 = TILT_BACK + F.curve * Math.PI / 180, tb = viewTilt(tb0);
-    hatPivot.position.set(F.x, pose.h + SIT + (hat.custom ? 0.04 : 0) + F.y - B * hairScale * Math.sin(tb0), zc - 0.03 - B * (hairScale - HAT_SCALE) * 0.6);
+    hatPivot.position.set(F.x, pose.h + SIT + (hat.custom ? 0.04 : 0) + F.y - B * hsR * Math.sin(tb0), zc - 0.03 - B * (hsR - HAT_SCALE) * 0.6);
     // tipped by viewTilt: turn about the front of the band, so the hat stays on the forehead and only the back moves
-    const zf = B * hairScale * F.size;
+    const zf = B * hsR * F.size;
     hatPivot.position.y += zf * (Math.sin(tb0) - Math.sin(tb)); hatPivot.position.z += zf * (Math.cos(tb0) - Math.cos(tb));
     hatPivot.rotation.set(-tb, 0, -F.tilt * Math.PI / 180); // crown tall enough to hold the hair
     let cs = 1;
-    if (!hat.custom && (!hat.model || hat.stretchCrown)) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, (top * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
+    if (!hat.custom && (!hat.model || hat.stretchCrown)) { const mt = hat.top * hsR * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, (top * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
     const sn = hat.snug || 1;   // knits and caps stretch over the head; felt and straw hats sit a little proud of it
-    hatPivot.scale.set(F.size * hairScale * sn, F.size * hairScale * F.stretch, F.size * hairScale * sn * Math.min(1.1, Math.max(0.92, headK.kz)));   // a longer head front to back needs a deeper hat MU.uCrown.value = cs;
+    hatPivot.scale.set(F.size * hsR * sn, F.size * hsR * F.stretch, F.size * hsR * sn * Math.min(1.1, Math.max(0.92, headK.kz))); MU.uCrown.value = cs;   // a longer head front to back needs a deeper hat
     headG.updateMatrixWorld(true); hatPivot.position.y += eyeClearance(pose, H, !!stream);
     /* A hat band is not level on a head: it crosses the mid-forehead in front but comes down to the tops of the ears at
        the sides, where the head curves away. Bend the lower edge down at the sides to the tops of the ears, fully for
@@ -576,7 +615,7 @@ function render(source, W, H, pose) {
     const earTop = pose.brow - 0.1;   // tops of the ears, a little below the eyebrows: lower and the hat cuts into the ears, higher and it leaves a gap
     const sideGap = Math.max(0, hatPivot.position.y - earTop);
     const sideDrop = Math.min(0.3, sideGap * (hat.sides ?? 0.5));
-    MU.uSideDrop.value = sideDrop / (F.size * hairScale * F.stretch); MU.uSideDropS.value = sideDrop / HR[1];   // the shadow line bends with it
+    MU.uSideDrop.value = sideDrop / (F.size * hsR * F.stretch); MU.uSideDropS.value = sideDrop / HR[1];   // the shadow line bends with it
     // light
     if (!stream || !PHONE || lightTick++ % 10 === 0) estimateLight(source, pose, !!stream);   // light changes slowly: phones sample it every 10th frame (each sample reads pixels back from the GPU)
     MU.uGrain.value = light.grain; MU.uSeed.value = stream ? (MU.uSeed.value + 17.3) % 1000 : 0;
@@ -586,7 +625,7 @@ function render(source, W, H, pose) {
     _v.set(light.side * 0.3, 1, 0.9).normalize();
     sun.target.position.copy(headG.position); sun.position.copy(headG.position).addScaledVector(_v, w * 5);
     const tn = Math.tan(tb), cy0 = top - HR[1], yF = pose.h + SIT + F.y;
-    MU.uRim.value = (yF - (tn * B + (hat.drop || 0)) * hairScale * F.size - cy0) / HR[1]; MU.uSlope.value = tn * HR[2] / HR[1];
+    MU.uRim.value = (yF - (tn * B + (hat.drop || 0)) * hsR * F.size - cy0) / HR[1]; MU.uSlope.value = tn * HR[2] / HR[1];
     MU.uLen.value = (hat.brim ? 0.55 : hat.custom ? 0.25 : 0.22) * F.size / HR[1]; MU.uSide.value = -light.side * 0.12;
     shadowMat.opacity = Math.min(0.9, S.shadow * (hat.brim ? 0.95 : 0.8));
     catcher.visible = S.shadow > 0;
@@ -594,6 +633,18 @@ function render(source, W, H, pose) {
     if (hat.custom) hat.group.children[0].material.color.setRGB(...light.tint.map(v => Math.min(1, v * (0.55 + 0.45 * e))));
     headG.updateMatrixWorld(true);
     MU.uHeadVz.value = cam.position.z - _v.set(0, top - HR[1], zc).applyMatrix4(headG.matrixWorld).z; MU.uSoft.value = w * 0.12;
+    // the band (the hat's head opening) on screen, for pressing the hair and the contact shading
+    if (S.press) {
+      const pl = hatPivot.localToWorld(_bl.set(-A, 0, 0)), pr = hatPivot.localToWorld(_br.set(A, 0, 0)), pf = hatPivot.localToWorld(_bf.set(0, 0, B));
+      const dx = pr.x - pl.x, dy = pr.y - pl.y, half = Math.hypot(dx, dy) / 2;
+      if (half > 1) {
+        const ux = dx / (2 * half), uy = dy / (2 * half), mx = (pl.x + pr.x) / 2, my = (pl.y + pr.y) / 2;
+        BG.uMid.value.set(mx, my); BG.uDir.value.set(ux, uy); BG.uHalf.value = half; BG.uW.value = w;
+        BG.uFront.value = Math.min(0, ((pf.x - mx) * -uy + (pf.y - my) * ux) / w);      // how far the front of the band hangs below its sides
+        BG.uDelta.value = half * Math.max(0, hairScale / hsR - 1);                     // the hair outline is this much wider than the pressed band
+        BG.uOn.value = headG.visible ? 1 - Math.min(1, Math.max(0, (Math.abs(pose.yaw) - 0.45) / 0.35)) : 0;
+      }
+    }
   }
   renderer.render(scene, cam);
   if (pose && S.debug) drawDebug(pose, W, H);
