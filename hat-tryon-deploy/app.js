@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=f17e986";
+import { HATS, A, B } from "./hats.js?v=e3e5eae";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -499,7 +499,7 @@ let eyeLift = 0;   // head widths the hat is raised to keep its front edge off t
    forehead estimate alike. Returns how far to raise the hat along the head (head widths). */
 function eyeClearance(pose, H, live) {
   const L = pose.lm, w = pose.w, eyeTop = H - Math.min(L[159].y, L[386].y, L[160].y, L[385].y) * H;   // world y is up
-  const guard = eyeTop + 0.085 * w;
+  const guard = eyeTop + (hat.eyeGap ?? 0.085) * w;   // per hat: wide brims keep a bigger gap
   hatPivot.updateMatrixWorld(true);
   let low = Infinity; for (const p of frontEdge(hat)) low = Math.min(low, _v.copy(p).applyMatrix4(hat.group.matrixWorld).y);
   const up = Math.max(0.35, _v.set(0, 1, 0).applyQuaternion(headG.quaternion).y);
@@ -822,5 +822,5 @@ $("snapBtn").onclick = () => {
 if (matchMedia("(max-width: 760px)").matches) $("settings").open = false;   // phones: the picture and hats first, settings folded
 if (TOUCH) $("hint").textContent = "Tip: drag the hat to move it, pinch to resize it.";
 renderSwatches(); selectHat(hat);
-window.hatTryOn = { get pose() { return curPose(); }, get hat() { return hat; }, get hairScale() { return hairScale; }, get hairTop() { return hairTop; }, light, hats, S };   // for debugging from the console
+window.hatTryOn = { get eyeLift() { return eyeLift; }, get pose() { return curPose(); }, get hat() { return hat; }, get hairScale() { return hairScale; }, get hairTop() { return hairTop; }, light, hats, S };   // for debugging from the console
 init();
