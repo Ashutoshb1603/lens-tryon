@@ -387,7 +387,8 @@ const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(FP.pc,FP.pb
 const PUPIL_PRIOR=.4;
 const BLINK_KEY=(()=>{ const q=new URLSearchParams(location.search).get('blinkSwap'); return q?['eyeBlinkRight','eyeBlinkLeft']:['eyeBlinkLeft','eyeBlinkRight']; })();   // [image-right eye, image-left eye]                                            // typical indoor pupil/iris ratio
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
-const resetFilters=()=>{ filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
+const openBase=[null,null];                                    // this person's normal open-eye lid opening, per eye
+const resetFilters=()=>{ openBase[0]=openBase[1]=null; filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
   pupilRaw[0]=pupilRaw[1]=null; ratioRaw[0]=ratioRaw[1]=null; pupilMem[0]=pupilMem[1]=null; pupilShown[0]=pupilShown[1]=null; offMem[0]=offMem[1]=null; statMem[0]={}; statMem[1]={};
   eyeVis[0]=eyeVis[1]=1; eyeVisT[0]=eyeVisT[1]=null; eyeLast[0]=eyeLast[1]=null; eyeOff[0]=[0,0]; eyeOff[1]=[0,0]; };          // irisModel survives brief tracking loss
 
@@ -556,7 +557,16 @@ function applyLens(g, W, H){
       if(SEG.iris[i]>.5) nI++; else if(SEG.occ[i]>.5) nO++; }
     visShare=nI/Math.max(1,Math.PI*rc*rc-nO); }
   g.visShare=visShare;
-  const openFade = SEG ? Math.min(1-smooth(.35,.6,g.blink||0), smooth(.18,.38,visShare))
+  // Lid opening compared with THIS person's normal open eye (learned while not blinking): on a half blink the
+  // landmarks + blink score see the lids coming down even when the model still reads the slit as iris
+  // (glasses glare, dim light, blur). The lens follows whichever signal says "closing" first.
+  let lidRatio=1;
+  if(g.useFilter){ const sl=g.slot, b0=g.blink||0;
+    if(openBase[sl]==null) openBase[sl]=Math.max(g.open,.3);
+    if(b0<.12) openBase[sl]+=(g.open-openBase[sl])*.05;
+    lidRatio=g.open/Math.max(.05,openBase[sl]); }
+  g.lidRatio=lidRatio;
+  const openFade = SEG ? Math.min(1-smooth(.2,.45,g.blink||0), smooth(.5,.82,lidRatio), smooth(.18,.38,visShare))
                        : smooth(.08,.16,g.open)*(1-smooth(.38,.58,g.blink||0));
   g.openFade=openFade;
   if(SEG && SEG.nIris<6) return;                                  // closed eye, hand over the eye: nothing to colour
@@ -783,7 +793,7 @@ function applyLens(g, W, H){
 
 function drawDebug(g){
   ctx.save(); ctx.lineWidth=Math.max(1,g.rx*.06);
-  { const t=(g.seg?"AI ":"classic ")+"vis "+(g.visShare??1).toFixed(2)+" blink "+(g.blink||0).toFixed(2)+" lens "+(g.openFade??1).toFixed(2);
+  { const t=(g.seg?"AI ":"classic ")+"vis "+(g.visShare??1).toFixed(2)+" lid "+(g.lidRatio??1).toFixed(2)+" blink "+(g.blink||0).toFixed(2)+" lens "+(g.openFade??1).toFixed(2);
     ctx.save(); if(mirrored){ ctx.translate(2*g.cx,0); ctx.scale(-1,1); }       // the view is mirrored by CSS: keep text readable
     ctx.font=`600 ${Math.max(11,g.rx*.7)|0}px system-ui`; const tw=ctx.measureText(t).width;
     ctx.fillStyle="rgba(0,0,0,.6)"; ctx.fillRect(g.cx-tw/2-4,g.cy-g.rx*3.2,tw+8,Math.max(11,g.rx*.7)+6);
@@ -828,7 +838,7 @@ function processFrame(source, W, H, lmList, t, useFilter, segs){
     if(mirrored) ctx.rect(W-sx,0,sx,H); else ctx.rect(0,0,sx,H);
     ctx.clip(); ctx.drawImage(source,0,0,W,H); ctx.restore();
   }
-  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink,visFrac:g.seg?+g.visShare.toFixed(3):null,fade:g.openFade,model:!!g.seg}));
+  window.__eyes=geoms.map(g=>({cx:g.cx,cy:g.cy,rawx:g.rawx,rawy:g.rawy,pcx:g.pcx,pcy:g.pcy,rx:g.rx,open:g.open,pupil:g.pupilUsed,dbg:g.dbg,blink:g.blink,visFrac:g.seg?+g.visShare.toFixed(3):null,fade:g.openFade,lid:g.lidRatio,model:!!g.seg}));
   if(S.debug) geoms.forEach(drawDebug);
   return geoms.length>0;
 }
@@ -1052,7 +1062,7 @@ function recordFrame(t, procMs, found){
   }
   const rd=v=>v==null?null:+(+v).toFixed(2);
   r.log.frames.push({ n:r.n, t:+ts.toFixed(3), fps:rd(fpsAvg), procMs:rd(procMs), found,
-    eyes:(window.__eyes||[]).map(e=>({cx:rd(e.cx),cy:rd(e.cy),pcx:rd(e.pcx),pcy:rd(e.pcy),rx:rd(e.rx),open:rd(e.open),pupil:rd(e.pupil),vis:e.dbg?e.dbg.vis:null,occluded:e.dbg?!(e.dbg.matchOK&&e.dbg.contrastOK):null,blink:rd(e.blink),visShare:rd(e.visFrac),fade:rd(e.fade),model:e.model})), segMs:rd(segMs) });
+    eyes:(window.__eyes||[]).map(e=>({cx:rd(e.cx),cy:rd(e.cy),pcx:rd(e.pcx),pcy:rd(e.pcy),rx:rd(e.rx),open:rd(e.open),pupil:rd(e.pupil),vis:e.dbg?e.dbg.vis:null,occluded:e.dbg?!(e.dbg.matchOK&&e.dbg.contrastOK):null,blink:rd(e.blink),visShare:rd(e.visFrac),lid:rd(e.lid),fade:rd(e.fade),model:e.model})), segMs:rd(segMs) });
   r.n++;
 }
 function stopRecording(){
