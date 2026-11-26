@@ -64,3 +64,12 @@ On by default. Settings → "Fit to my head shape" switches it off for compariso
 
 Rebuild the data: `python3 tools/build_headshape.py <ICT-FaceKit>/FaceXModel canonical_face_model.obj models/headshape`,
 then `python3 tools/calibrate_headshape.py models/headshape <aligned landmarks of real faces>.json`.
+
+## Phones
+
+- Camera only (no microphone or location). If the site is already allowed, the camera starts by itself; if access
+  is blocked, the start panel shows the exact steps for iPhone Safari / Android Chrome and a Try again button.
+  In-app browsers (Instagram, WhatsApp, …) that can't use the camera are told to open the page in Safari / Chrome.
+- Flip camera (front / back; the back camera isn't mirrored), Take photo (opens the phone camera), Upload photo.
+- The camera comes back by itself after the app was in the background; the screen stays awake while live.
+- Installable: Share → Add to Home Screen (iPhone) or ⋮ → Install app (Android) opens it full-screen with its icon.

@@ -1,8 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=69ff787";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=69ff787";
+import { HATS, A, B } from "./hats.js?v=0be6b6f";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=0be6b6f";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -719,6 +719,7 @@ async function init(localModel) {
     setStatus(segmenter ? "Model ready" : "Model ready (no hair model)", "ok"); statusEl.title = "";
     $("camBtn").disabled = false; $("camBtn2").disabled = false; $("modelPick").style.display = "none";
     if (pendingPhoto) { const p = pendingPhoto; pendingPhoto = null; loadPhoto(p); }
+    else autoStart();
   } catch (e) {
     console.error(e);
     const msg = String(e && e.message || e);
@@ -855,20 +856,79 @@ function pickFace(res, W, H, prev) {
   return best;
 }
 const frameCv = document.createElement("canvas"), frameCtx = frameCv.getContext("2d");
+/* ---------------- Camera: permission, front/back, phones ---------------- */
+let facing = "user", wakeLock = null;
+const IN_APP = /Instagram|FBAN|FBAV|FB_IAB|Line\/|MicroMessenger|WhatsApp|Snapchat|LinkedInApp|TikTok|musical_ly|Twitter/i.test(navigator.userAgent);
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+function cameraHelp(kind) {   // the start panel turns into a short, specific how-to-fix
+  const el = $("camHelp"); if (!el) return;
+  const how = IOS
+    ? "On iPhone: tap <b>aA</b> in the address bar → <b>Website Settings</b> → <b>Camera: Allow</b>, then tap Try again. (Or Settings → Safari → Camera → Allow.)"
+    : "On Android: tap the <b>🔒</b> or <b>⚙</b> icon left of the address → <b>Permissions</b> → <b>Camera: Allow</b>, then tap Try again.";
+  const msg = {
+    denied: `<b>Camera access is blocked.</b> ${how}`,
+    inapp: "<b>This app's built-in browser can't use the camera.</b> Tap <b>⋯</b> → <b>Open in Safari</b> (iPhone) or <b>Open in Chrome</b> (Android). You can still upload a photo here.",
+    none: "<b>No camera found.</b> You can upload a photo instead.",
+    busy: "<b>The camera is in use by another app</b> (a video call?). Close it and tap Try again.",
+    insecure: "<b>The camera needs a secure page.</b> Open the https:// link.",
+    other: "<b>Couldn't start the camera.</b> Tap Try again, or upload a photo.",
+  }[kind];
+  el.innerHTML = msg; el.hidden = false; $("camBtn2").textContent = "Try again";
+  $("empty").style.display = "";
+}
+async function openStream() {
+  const size = PHONE ? {} : { width: { ideal: 1280 }, height: { ideal: 720 } };
+  try { return await navigator.mediaDevices.getUserMedia({ video: { ...size, facingMode: facing }, audio: false }); }
+  catch (e) {
+    if (e && (e.name === "OverconstrainedError" || e.name === "NotFoundError") && facing !== "user") { facing = "user"; return openStream(); }
+    if (e && e.name === "OverconstrainedError") return navigator.mediaDevices.getUserMedia({ video: true, audio: false });   // any camera at all
+    throw e;
+  }
+}
+async function keepAwake() {   // the screen would dim and lock in the middle of trying hats on
+  try { if ("wakeLock" in navigator && !wakeLock && document.visibilityState === "visible") { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch (e) {}
+}
 async function startCamera() {
   if (stream) { stopCamera(); return; }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: PHONE ? { facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
-  } catch (e) { setStatus("Camera blocked — allow access or open via http://localhost", "err"); return; }
-  video.srcObject = stream; await video.play();
+  if (!window.isSecureContext) { cameraHelp("insecure"); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { cameraHelp(IN_APP ? "inapp" : "none"); return; }
+  setStatus("Starting camera…");
+  try { stream = await openStream(); }
+  catch (e) {
+    const n = e && e.name;
+    setStatus("Camera unavailable", "err");
+    cameraHelp(n === "NotAllowedError" || n === "SecurityError" ? (IN_APP ? "inapp" : "denied") : n === "NotFoundError" ? "none" : n === "NotReadableError" || n === "AbortError" ? "busy" : IN_APP ? "inapp" : "other");
+    return;
+  }
+  $("camHelp").hidden = true; $("camBtn2").textContent = "Start camera";
+  stream.getVideoTracks()[0]?.addEventListener("ended", () => { if (document.visibilityState === "visible" && stream) restartCamera(); });
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) { video.muted = true; await video.play().catch(() => {}); }   // iOS low-power mode can refuse autoplay
+  const st = stream.getVideoTracks()[0]?.getSettings?.() || {};
+  const front = (st.facingMode || facing) !== "environment";
+  keepAwake();
   await setMode("VIDEO"); resetFilters(); headReset(); trackedPose = null; vel.x = vel.y = 0;
-  still = null; stillPose = null; mirrored = true; out.classList.add("mirror"); ovl.classList.add("mirror");
+  still = null; stillPose = null; mirrored = front; out.classList.toggle("mirror", front); ovl.classList.toggle("mirror", front);
+  $("flipBtn").hidden = !TOUCH;
   { const ps = Math.min(1, PROC_MAX / Math.max(video.videoWidth, video.videoHeight)); frameCv.width = Math.round(video.videoWidth * ps); frameCv.height = Math.round(video.videoHeight * ps); }
   $("empty").style.display = "none"; $("snapBtn").disabled = false; cmp.disabled = false; fpsEl.style.display = ""; vp.classList.add("live");
   $("camBtn").textContent = "Stop camera"; setStatus("Model ready", "ok");
   loop();
 }
+async function restartCamera() {   // after the phone took the camera away (app in the background, a call) or a flip
+  if (!stream) return;
+  cancelAnimationFrame(rafId); stream.getTracks().forEach(t => t.stop()); stream = null; livePose = null;
+  await startCamera();
+}
+async function flipCamera() { facing = facing === "user" ? "environment" : "user"; if (stream) await restartCamera(); }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !stream) return;
+  keepAwake();
+  const t = stream.getVideoTracks()[0];
+  if (!t || t.readyState === "ended") restartCamera();   // iOS ends the camera when the app goes to the background
+});
 function stopCamera() {
+  wakeLock?.release().catch(() => {}); wakeLock = null; $("flipBtn").hidden = true;
   cancelAnimationFrame(rafId); stream.getTracks().forEach(t => t.stop()); stream = null; livePose = null;
   $("camBtn").textContent = "Start camera"; fpsEl.style.display = "none"; $("hint").textContent = "Camera stopped.";
   if (!still) {
@@ -925,7 +985,13 @@ function loop() {
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps" + (DEBUG ? ` · track ${prof.track | 0} · mask ${prof.seg | 0} · draw ${prof.render | 0} ms · ${W}x${H} · ${delegates.join("/")} · head ${headFitter?.result ? `depth ${((headTarget.kz - 1) * 100).toFixed(0)}% crown ${(headTarget.dTop * 100).toFixed(1)}` : headFitter ? Math.round(headFitter.progress * 100) + "%" : "-"}` : ""); }
   lastT = t;
 }
-$("camBtn").onclick = startCamera; $("camBtn2").onclick = startCamera;
+$("camBtn").onclick = startCamera; $("camBtn2").onclick = startCamera; $("flipBtn").onclick = flipCamera;
+/* camera already allowed for this site (Chrome, Android, Safari once set to Allow): start it straight away */
+async function autoStart() {
+  if (stream || still || IN_APP) return;
+  try { const p = await navigator.permissions?.query({ name: "camera" }); if (p && p.state === "granted") startCamera(); }
+  catch (e) {}   // the browser can't say: wait for the tap
+}
 
 /* ---------------- Photo ---------------- */
 let still = null, stillPose = null, stillSeg = null, pendingPhoto = null;
@@ -952,13 +1018,14 @@ function refreshStill() {
   $("hint").textContent = stillPose ? "Face found · " + poseText(stillPose) + " · " + MOVE_TIP : "No face found. Try a clearer photo with the whole head visible.";
   requestStill();
 }
-$("photoIn").addEventListener("change", e => {
+const onPhotoFile = e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   const img = new Image();
   img.onload = () => { loadPhoto(img); URL.revokeObjectURL(img.src); };
   img.onerror = () => { $("hint").textContent = "Could not read that image."; };
   img.src = URL.createObjectURL(f);
-});
+};
+$("photoIn").addEventListener("change", onPhotoFile); $("photoCam").addEventListener("change", onPhotoFile);
 let stillPending = false, lastSegWanted = false;
 function requestStill() {
   if (!still || stream || stillPending) return; stillPending = true;
