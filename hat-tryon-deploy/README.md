@@ -52,3 +52,15 @@ Best results come from a front-on product photo on a plain background. Use **Tol
 The "Boonie" hat is a photo-scanned 3D model (Poly Haven "Fisherman's Hat", CC0) with real fabric textures, and is the most realistic hat here.
 Use "Upload a 3D hat model (.glb)" to try your own: the model is scaled to the head automatically. It should be y-up with the front
 towards +z, a single self-contained .glb, not Draco/Meshopt compressed.
+
+## Personal head shape
+
+The camera sees the face, not the skull behind it. `headshape.js` estimates the person's head once: about a
+second of near-frontal frames (or the one photo) is fitted with the identity modes of a 3D head model (ICT Face
+Model, MIT), using only the landmarks above the nose so smiling or talking doesn't matter. The fitted head's
+skull gives its depth front to back, where the skull sits behind the forehead, and the crown height. They're used
+as ratios to the average head (calibrated on 75 real faces), so an average head gets exactly the tuned fit.
+On by default. Settings → "Fit to my head shape" switches it off for comparison; `?debug` shows the estimate.
+
+Rebuild the data: `python3 tools/build_headshape.py <ICT-FaceKit>/FaceXModel canonical_face_model.obj models/headshape`,
+then `python3 tools/calibrate_headshape.py models/headshape <aligned landmarks of real faces>.json`.

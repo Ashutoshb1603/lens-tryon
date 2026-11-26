@@ -14,3 +14,33 @@ CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 
 Changes made for this app: textures reduced to 1024 px WebP, meshes welded and simplified, the cap's
 specular-glossiness material converted to metallic-roughness. The shapes are otherwise unchanged.
+
+## Head shape model
+
+`models/headshape.bin` / `.json` are derived from the identity model of the **ICT Face Model (ICT-FaceKit)**,
+https://github.com/ICT-VGL/ICT-FaceKit, aligned to MediaPipe's canonical face (`tools/build_headshape.py`) and
+calibrated on real MediaPipe landmarks (`tools/calibrate_headshape.py`). Licence of the source:
+
+    MIT License
+
+    Copyright (c) 2020 USC Institute for Creative Technologies
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+MediaPipe's canonical face model (Apache 2.0) was used only to build it and is not shipped.
