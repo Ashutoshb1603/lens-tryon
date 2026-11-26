@@ -110,12 +110,22 @@ for lam in (0.5, 2, 6, 15):
     res[lam] = ef.tolist()
     print(f"lam {lam:>4}: mean abs error fit / mean-head  rx {ef[0]:.3f}/{em[0]:.3f}  ry {ef[1]:.3f}/{em[1]:.3f}  rz {ef[2]:.3f}/{em[2]:.3f}  cz {ef[4]:.3f}/{em[4]:.3f}  top {ef[5]:.3f}/{em[5]:.3f}")
 
+# 4b. reference cross-section of the average head at the hat-band heights the app measures (forehead top -0.12,
+# -0.04, +0.04 head widths), for the head-turn scan: half-width, half-depth and depth centre, in head widths
+outer = np.r_[face, np.arange(9409, 11248)]; Vo = V0m[outer]
+Cm = (V0m[idx[234]] + V0m[idx[454]]) / 2; wm = np.linalg.norm(V0m[idx[454]] - V0m[idx[234]]); y10 = V0m[idx[10]][1]
+ref = []
+for db in (-0.12, -0.04, 0.04):
+    sl = Vo[np.abs(Vo[:, 1] - (y10 + db * wm)) < 0.012 * wm]
+    ref.append([(sl[:, 0].max() - sl[:, 0].min()) / 2 / wm, (sl[:, 2].max() - sl[:, 2].min()) / 2 / wm, ((sl[:, 2].max() + sl[:, 2].min()) / 2 - Cm[2]) / wm])
+ref = np.array(ref).mean(0); print("band cross-section a0 c0 z0", np.round(ref, 3))
+
 # 5. export: int16, one scale per block
 def q(a):
     sc = np.abs(a).max() / 32000; return (np.round(a / sc).astype("<i2"), float(sc))
 blocks = {"Lmean": V0m[L_idx], "Lmodes": modesm[:, L_idx], "Smean": V0m[S_idx], "Smodes": modesm[:, S_idx]}
 meta = {"K": K, "lm": lmk, "nL": len(lmk), "nS": len(S_idx), "blocks": [], "mean": mean_m.tolist(),
-        "source": "ICT-FaceKit (USC ICT, MIT licence) identity model, aligned to the MediaPipe canonical face"}
+        "profileRef": {"a0": float(ref[0]), "c0": float(ref[1]), "z0": float(ref[2])}, "source": "ICT-FaceKit (USC ICT, MIT licence) identity model, aligned to the MediaPipe canonical face"}
 buf = b""
 for name, arr in blocks.items():
     qa, sc = q(arr.astype(np.float64)); meta["blocks"].append({"name": name, "shape": list(arr.shape), "scale": sc, "offset": len(buf)}); buf += qa.tobytes()

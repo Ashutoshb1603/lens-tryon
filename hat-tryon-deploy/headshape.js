@@ -21,7 +21,7 @@ export async function loadHeadModel(base) {
     for (let i = 0; i < n; i++) f[i] = q[i] * b.scale;
     B[b.name] = f;
   }
-  const m = { K: meta.K, lm: meta.lm, nL: meta.nL, nS: meta.nS, ...B };
+  const m = { K: meta.K, lm: meta.lm, nL: meta.nL, nS: meta.nS, profileRef: meta.profileRef, ...B };
   // real tracker output differs a little from the model's average face: this offset (the average of real faces) is removed
   m.bias = meta.bias ? Float64Array.from(meta.bias) : new Float64Array(meta.nL * 3);
   // only the face above the nose: the jaw and chin move with the mouth (smiling, talking), the rest belongs to the head
