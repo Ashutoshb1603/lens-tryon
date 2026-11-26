@@ -1,9 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=925bbe3";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=925bbe3";
-import { HeadScan, bandOutline } from "./headscan.js?v=925bbe3";
+import { HATS, A, B } from "./hats.js?v=f4940b4";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=f4940b4";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -86,71 +85,14 @@ const HEAD_R = [0.535, 0.8, 0.66];   // head shape half-axes, in head widths (an
 /* The person's own head, estimated once from their face (headshape.js): ratios to the average head, so an average
    person gets exactly the tuned fit. kx/ky/kz: skull half-axes, kd: forehead to skull centre (front to back),
    dTop: crown height above the forehead, in head widths. headK eases towards headTarget, so the hat never jumps. */
-const HEAD_AVG = { kx: 1, ky: 1, kz: 1, kd: 1, dTop: 0, dz: 0 };
-let headModel = null, headFitter = null, headTarget = HEAD_AVG, headFace = null;
+const HEAD_AVG = { kx: 1, ky: 1, kz: 1, kd: 1, dTop: 0 };
+let headModel = null, headFitter = null, headTarget = HEAD_AVG;
 const headK = { ...HEAD_AVG };
-/* The head-turn scan (headscan.js) measures depth instead of guessing it: when there is one it replaces the
-   model's kz/kd. It is remembered on this device, since it takes the person a few seconds. */
-const SCAN_KEY = "hatTryOn.headScan";
-let headScan = null, scanRes = null, scanSaved = null, scanState = "idle";   // idle | scanning | done | skipped
-try { scanSaved = JSON.parse(localStorage.getItem(SCAN_KEY) || "null"); } catch (e) {}
-function headMerge() {
-  const m = headFace || HEAD_AVG, p = scanRes;
-  headTarget = p ? { ...m, kz: p.kz, kd: 1, dz: p.dz } : { ...m, dz: 0 };
-}
-function headReset(newPerson) {   // newPerson: the tracked face changed, so the saved scan is someone else's
-  headFitter?.reset(); headFace = null;
-  if (newPerson) { scanRes = null; headScan?.reset(); scanState = stream && headScan ? "scanning" : "idle"; scanShownDone = 0; }
-  headMerge();
-}
+function headReset() { headFitter?.reset(); headTarget = HEAD_AVG; }
 function headFeed(lm, W, H, pose, frames) {   // one tracked face; returns true when a new estimate was made
   if (!headFitter || !S.headShape || headFitter.result) return false;
   const r = headFitter.add(lm, W, H, pose, frames); if (!r) return false;
-  headFace = r; headMerge(); console.info("Head shape:", Object.fromEntries(["kx", "ky", "kz", "kd", "dTop"].map(k => [k, +r[k].toFixed(3)]))); return true;
-}
-function scanFeed(seg, pose, W, H) {   // a mask from the live camera, with the pose of its frame
-  if (!headScan || scanState !== "scanning" || !S.headShape) return;
-  const r = headScan.add(seg, pose, W, H); if (r) scanDone(r);
-}
-function scanDone(r) {
-  if (r.failed) { headScan.reset(); console.warn("Head scan: outline did not fit a head, starting over"); return; }
-  scanRes = r; scanState = "done"; scanShownDone = 0; headMerge();
-  scanSaved = { kz: r.kz, dz: r.dz, at: Date.now() };
-  try { localStorage.setItem(SCAN_KEY, JSON.stringify(scanSaved)); } catch (e) {}
-  console.info("Head scan:", { a: +r.a.toFixed(3), c: +r.c.toFixed(3), cz: +r.cz.toFixed(3), kz: +r.kz.toFixed(3), dz: +r.dz.toFixed(3), frames: r.frames });
-  scanUI(); setTimeout(scanUI, 2500);
-}
-/* the prompt on the camera view: which way to turn, how far along */
-let scanShownDone = 0;
-function scanUI() {
-  const el = document.getElementById("scan"); if (!el) return;
-  const btn = document.getElementById("scanBtn"), info = document.getElementById("scanInfo");
-  if (btn) btn.disabled = !headScan || !stream;
-  if (info) info.textContent = scanRes ? `measured: ${scanRes.kz >= 1 ? "+" : ""}${((scanRes.kz - 1) * 100).toFixed(0)}% depth` : "";
-  if (scanState === "done" && !scanShownDone) scanShownDone = performance.now();
-  const showDone = scanState === "done" && performance.now() - scanShownDone < 2400 && scanShownDone > 0;
-  const show = stream && S.headShape && (scanState === "scanning" || showDone);
-  el.hidden = !show; if (!show) return;
-  el.classList.toggle("done", scanState === "done");
-  const arrow = document.getElementById("scanArrow"), text = document.getElementById("scanText");
-  if (scanState === "done") { arrow.textContent = "✓"; arrow.className = "scanArrow"; arrow.style.animation = "none"; text.textContent = "Head measured: hats now fit your head"; return; }
-  arrow.style.animation = "";
-  const next = headScan.next, p = headScan.progress, yaw = livePose ? livePose.yaw : 0;
-  // the live view is mirrored, so the person's left is on the left of the screen
-  if (!livePose) { arrow.textContent = ""; text.textContent = "Look at the camera"; }
-  else if (headScan.n.front < 4 && Math.abs(yaw) > 0.2) { arrow.textContent = "•"; arrow.className = "scanArrow"; text.textContent = "Look straight at the camera"; }
-  else if (next === "left") { arrow.textContent = "←"; arrow.className = "scanArrow"; text.textContent = yaw > 0.4 ? "Hold… now slowly back" : "Turn your head slowly to the left"; }
-  else if (next === "right") { arrow.textContent = "→"; arrow.className = "scanArrow right"; text.textContent = yaw < -0.4 ? "Hold… now slowly back" : "Now slowly to the right"; }
-  else { arrow.textContent = "•"; arrow.className = "scanArrow"; text.textContent = "Look straight at the camera"; }
-  document.getElementById("scanFill").style.width = (p * 100).toFixed(0) + "%";
-}
-function scanSkip() { scanState = "skipped"; headScan?.reset(); scanUI(); }
-function scanStart() { if (!headScan) return; headScan.reset(); scanRes = null; scanShownDone = 0; headMerge(); scanState = "scanning"; scanUI(); }
-/* on camera start: a scan saved on this device is used; without one, the scan starts by itself (skippable) */
-function scanOnCamera() {
-  if (!headScan) return;
-  if (scanSaved) { scanRes = scanSaved; scanState = "done"; scanShownDone = -1; headMerge(); scanUI(); }
-  else if (scanState !== "skipped") scanStart();
+  headTarget = r; console.info("Head shape:", Object.fromEntries(["kx", "ky", "kz", "kd", "dTop"].map(k => [k, +r[k].toFixed(3)]))); return true;
 }
 const headGeo = new THREE.SphereGeometry(1, 48, 32);
 const occluder = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({ colorWrite: false })); occluder.renderOrder = -1;
@@ -443,8 +385,6 @@ for (const k of ["occlude", "debug", "keyBg", "headShape"]) $(k).addEventListene
   if (k === "keyBg" && customImg) setCustom(customImg, true);
   if (k === "occlude" && still) refreshStill(); else requestStill();
 });
-$("scanBtn").onclick = () => { scanSaved = null; try { localStorage.removeItem(SCAN_KEY); } catch (e) {} scanStart(); };
-$("scanSkip").onclick = scanSkip;
 $("resetBtn").onclick = () => { hat.fit = { ...hat.base }; syncFitUI(); requestStill(); };
 const cmp = $("cmpBtn");
 const setOrig = v => { S.showOrig = v; requestStill(); };
@@ -611,7 +551,7 @@ function render(source, W, H, pose) {
     const tgt = S.headShape ? headTarget : HEAD_AVG, ease = stream ? 0.08 : 1;
     for (const k in headK) headK[k] += (tgt[k] - headK[k]) * ease;
     const HR = [HEAD_R[0] * headK.kx, HEAD_R[1] * headK.ky, HEAD_R[2] * headK.kz];
-    const zc = pose.fz - HEAD_R[2] * 0.97 * headK.kd + headK.dz, top = pose.h + 0.3 + headK.dTop;
+    const zc = pose.fz - HEAD_R[2] * 0.97 * headK.kd, top = pose.h + 0.3 + headK.dTop;
     for (const m of [occluder, catcher, wire]) { m.scale.set(HR[0], HR[1], HR[2]); m.position.set(0, top - HR[1], zc); }
     // the shadow shell is as wide as the hat band, so it reaches the ears and the hair at the sides (the person mask trims it)
     const bandX = A * hairScale * F.size * (hat.snug || 1);
@@ -701,8 +641,7 @@ async function createTask(make) {
 async function init(localModel) {
   // the head-shape model is small (~100 KB) and optional: load it alongside, carry on without it
   loadHeadModel(new URL("./models/headshape", import.meta.url).href).then(m => {
-    headModel = m; headFitter = new HeadFitter(m); headScan = new HeadScan(m.profileRef);
-    if (stream) scanOnCamera();
+    headModel = m; headFitter = new HeadFitter(m);
     if (still && stillPose) { headFeed(stillPose.lm, still.width, still.height, stillPose, 1); requestStill(); }
   }).catch(e => console.warn("Head shape model unavailable, using the average head:", e));
   try {
@@ -764,7 +703,7 @@ function startSegWorker(model) {
       const pose = segPoses.get(m.id); segPoses.clear();
       if (!m.seg || !pose || !stream || !livePose) return;
       const W = frameCv.width, H = frameCv.height;
-      m.seg.pose = pose; hairFit(m.seg, pose, W, H, true); scanFeed(m.seg, pose, W, H); lastLiveSeg = m.seg;
+      m.seg.pose = pose; hairFit(m.seg, pose, W, H, true); lastLiveSeg = m.seg;
       if (needMask()) { setMask(m.seg, pose); maskFollow(livePose); }
     }
   };
@@ -826,7 +765,7 @@ function startTrackWorker(model) {
       const fi = pickFace(m.res, W, H, trackedPose), lm = fi < 0 ? null : m.res.faceLandmarks[fi];
       if (lm) {
         if (pickFace.switched) { resetFilters(); trackedPose = null; }
-        if (pickFace.switched) headReset(true);
+        if (pickFace.switched) headReset();
         const p = headPose(lm, m.res.facialTransformationMatrixes[fi], W, H, m.t, true); p._t = m.t; headFeed(lm, W, H, p);
         if (trackedPose) {
           const dt = m.t - trackedPose._t;
@@ -870,7 +809,7 @@ async function startCamera() {
     stream = await navigator.mediaDevices.getUserMedia({ video: PHONE ? { facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
   } catch (e) { setStatus("Camera blocked — allow access or open via http://localhost", "err"); return; }
   video.srcObject = stream; await video.play();
-  await setMode("VIDEO"); resetFilters(); headReset(); trackedPose = null; vel.x = vel.y = 0; scanOnCamera();
+  await setMode("VIDEO"); resetFilters(); headReset(); trackedPose = null; vel.x = vel.y = 0;
   still = null; stillPose = null; mirrored = true; out.classList.add("mirror"); ovl.classList.add("mirror");
   { const ps = Math.min(1, PROC_MAX / Math.max(video.videoWidth, video.videoHeight)); frameCv.width = Math.round(video.videoWidth * ps); frameCv.height = Math.round(video.videoHeight * ps); }
   $("empty").style.display = "none"; $("snapBtn").disabled = false; cmp.disabled = false; fpsEl.style.display = ""; vp.classList.add("live");
@@ -878,7 +817,7 @@ async function startCamera() {
   loop();
 }
 function stopCamera() {
-  cancelAnimationFrame(rafId); stream.getTracks().forEach(t => t.stop()); stream = null; livePose = null; scanUI();
+  cancelAnimationFrame(rafId); stream.getTracks().forEach(t => t.stop()); stream = null; livePose = null;
   $("camBtn").textContent = "Start camera"; fpsEl.style.display = "none"; $("hint").textContent = "Camera stopped.";
   if (!still) {
     $("empty").style.display = ""; $("snapBtn").disabled = true; cmp.disabled = true; vp.classList.remove("live");
@@ -913,7 +852,7 @@ function loop() {
   const res = landmarker.detectForVideo(frameCv, t); prof.track = prof.track * 0.9 + (performance.now() - t) * 0.1;
   const fi = pickFace(res, W, H, livePose), lm = fi < 0 ? null : res.faceLandmarks[fi];
   if (lm) {
-    if (pickFace.switched) { resetFilters(); headReset(true); }
+    if (pickFace.switched) { resetFilters(); headReset(); }
     livePose = headPose(lm, res.facialTransformationMatrixes && res.facialTransformationMatrixes[fi], W, H, t, true); lastSeen = t;
     headFeed(lm, W, H, livePose);
     // the hair/face mask is the heaviest step: on a slow device (a phone) refresh it every 2nd or 3rd frame and reuse it between
@@ -924,13 +863,12 @@ function loop() {
       setMask(needMask() ? lastLiveSeg : null, livePose); maskFollow(livePose);
     } else {
     const t1 = performance.now(), seg = segmenter && want ? segment(segSmall(frameCv), t) : null; if (seg) prof.seg = prof.seg * 0.8 + (performance.now() - t1) * 0.2;
-    if (seg) { hairFit(seg, livePose, W, H, true); scanFeed(seg, livePose, W, H); lastLiveSeg = seg; }
+    if (seg) { hairFit(seg, livePose, W, H, true); lastLiveSeg = seg; }
     setMask(needMask() ? seg || lastLiveSeg : null, livePose); maskFollow(livePose);
     }
   } else if (!livePose || t - lastSeen > HOLD_MS) { livePose = null; resetFilters(); }   // a missed frame or two: keep the hat where it was
   }
   const t2 = performance.now(); render(frameCv, W, H, livePose); prof.render = prof.render * 0.9 + (performance.now() - t2) * 0.1;
-  if (t - lastHint > 250) scanUI();
   if (t - lastHint > 250) { lastHint = t; $("hint").textContent = livePose && hatCut(H) ? "The hat goes past the top of the picture: move the phone back a little or tilt it up." : livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame."; }   // text 4x a second: re-layout every frame costs on phones
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps" + (DEBUG ? ` · track ${prof.track | 0} · mask ${prof.seg | 0} · draw ${prof.render | 0} ms · ${W}x${H} · ${delegates.join("/")} · head ${headFitter?.result ? `depth ${((headTarget.kz - 1) * 100).toFixed(0)}% crown ${(headTarget.dTop * 100).toFixed(1)}` : headFitter ? Math.round(headFitter.progress * 100) + "%" : "-"}` : ""); }
   lastT = t;
@@ -949,7 +887,7 @@ async function loadPhoto(img) {
   mirrored = false; out.classList.remove("mirror"); ovl.classList.remove("mirror");
   const res = landmarker.detect(still), fi = pickFace(res, still.width, still.height, null), lm = fi < 0 ? null : res.faceLandmarks[fi];
   stillPose = lm ? headPose(lm, res.facialTransformationMatrixes && res.facialTransformationMatrixes[fi], still.width, still.height, 0, false) : null;
-  headReset(); scanRes = null; headMerge(); if (lm) headFeed(lm, still.width, still.height, stillPose, 1);   // a photo: one frame is all there is
+  headReset(); if (lm) headFeed(lm, still.width, still.height, stillPose, 1);   // a photo: one frame is all there is
   stillSeg = null;
   $("empty").style.display = "none"; $("snapBtn").disabled = false; cmp.disabled = false; vp.classList.toggle("live", !!stillPose);
   refreshStill();
@@ -1034,5 +972,5 @@ $("snapBtn").onclick = () => {
 if (matchMedia("(max-width: 760px)").matches) $("settings").open = false;   // phones: the picture and hats first, settings folded
 if (TOUCH) $("hint").textContent = "Tip: drag the hat to move it, pinch to resize it.";
 renderSwatches(); selectHat(hat);
-window.hatTryOn = { get eyeLift() { return eyeLift; }, get pose() { return curPose(); }, get hat() { return hat; }, get hairScale() { return hairScale; }, get hairTop() { return hairTop; }, get outline() { return stillSeg && stillPose ? { ...bandOutline(stillSeg, stillPose, still.width, still.height), yaw: stillPose.yaw } : null; }, get scan() { return { state: scanState, res: scanRes, n: headScan && headScan.n }; }, get head() { return { ...headTarget, weights: undefined, raw: undefined }; }, light, hats, S };   // for debugging from the console
+window.hatTryOn = { get eyeLift() { return eyeLift; }, get pose() { return curPose(); }, get hat() { return hat; }, get hairScale() { return hairScale; }, get hairTop() { return hairTop; }, get head() { return { ...headTarget, weights: undefined, raw: undefined }; }, light, hats, S };   // for debugging from the console
 init();

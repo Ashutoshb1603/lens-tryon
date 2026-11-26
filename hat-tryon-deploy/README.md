@@ -64,12 +64,3 @@ On by default. Settings → "Fit to my head shape" switches it off for compariso
 
 Rebuild the data: `python3 tools/build_headshape.py <ICT-FaceKit>/FaceXModel canonical_face_model.obj models/headshape`,
 then `python3 tools/calibrate_headshape.py models/headshape <aligned landmarks of real faces>.json`.
-
-### Head-turn scan (measured depth)
-
-When the camera starts, a small prompt asks the person to turn their head slowly left and right (a few seconds,
-skippable). `headscan.js` reads the hair + face outline at hat-band height from the segmentation mask in every
-frame: turned, the outline's width shows the head's real depth front to back (hair included) and its offset
-shows where the back of the head is. One least-squares solve over frontal and turned frames gives both; they
-replace the face-only estimate. The result is saved on the device (localStorage), so a returning person isn't
-asked again; a different face starts a new scan; Settings → "Measure my head again" repeats it.
