@@ -163,10 +163,11 @@
 
     <div>
       <h3>Adjust</h3>
-      <div class="ctl"><label>Intensity <b id="v_intensity"></b></label><input type="range" id="intensity" min="0" max="1" step="0.01" value="0.85"></div>
+      <div class="ctl"><label>Intensity <b id="v_intensity"></b></label><input type="range" id="intensity" min="0" max="1" step="0.01" value="0.8"></div>
       <div class="ctl"><label>Lens diameter <b id="v_size"></b></label><input type="range" id="size" min="0.85" max="1.25" step="0.01" value="1.04"></div>
       <div class="ctl"><label>Pupil opening (manual) <b id="v_pupil"></b></label><input type="range" id="pupil" min="0.18" max="0.55" step="0.01" value="0.34"></div>
-      <div class="ctl"><label>Keep natural iris texture <b id="v_texture"></b></label><input type="range" id="texture" min="0" max="1" step="0.01" value="0.55"></div>
+      <div class="ctl"><label>Keep natural iris texture <b id="v_texture"></b></label><input type="range" id="texture" min="0" max="1" step="0.01" value="0.95"></div>
+      <div class="ctl"><label>Printed-dot pattern <b id="v_print"></b></label><input type="range" id="print" min="0" max="1" step="0.01" value="0.4"></div>
       <div class="ctl"><label>Limbal ring <b id="v_limbal"></b></label><input type="range" id="limbal" min="0" max="1" step="0.01" value="0.6"></div>
     </div>
 
@@ -226,12 +227,12 @@ const CORNERS_A = [33,133], CORNERS_B = [263,362];
 const IRIS_1 = [468,469,470,471,472], IRIS_2 = [473,474,475,476,477];               // center + 4 contour pts
 
 /* ---------------- Settings ---------------- */
-const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare:false, debug:false, keyWhite:true, autoPupil:true, split:.5 };
-["intensity","size","pupil","texture","limbal"].forEach(k=>{
+const S = { print:.4, intensity:.8, size:1.04, pupil:.34, texture:.95, limbal:.6, compare:false, debug:false, keyWhite:true, autoPupil:true, split:.5 };
+["intensity","size","pupil","texture","limbal","print"].forEach(k=>{
   const el=$(k), v=$("v_"+k);
   const show=()=>{ v.textContent = (+el.value).toFixed(2); };
   show();
-  el.addEventListener("input",()=>{ S[k]=+el.value; show(); if(k==="limbal") rebuildLens(); requestStill(); });
+  el.addEventListener("input",()=>{ S[k]=+el.value; show(); if(k==="limbal"||k==="print") rebuildLens(); requestStill(); });
 });
 ["compare","debug","keyWhite","autoPupil"].forEach(k=>$(k).addEventListener("change",e=>{
   S[k]=e.target.checked; if(k==="keyWhite" && customImg) buildCustomLens(customImg); updateSplitUI(); requestStill();
@@ -240,9 +241,9 @@ const S = { intensity:.85, size:1.04, pupil:.34, texture:.55, limbal:.6, compare
 /* ---------------- Procedural lens textures ---------------- */
 const TEX = 256;
 const PRESETS = [
-  { name:"Hazel",      inner:[176,128,48],  outer:[92,112,62],   ring:[38,32,18],  burst:[200,150,60], fiber:.9, opacity:.86 },
+  { name:"Hazel",      inner:[168,124,58],  outer:[96,104,66],   ring:[38,32,18],  burst:[200,150,60], fiber:.9, opacity:.86 },
   { name:"Ocean Blue", inner:[130,190,232], outer:[38,98,172],   ring:[14,28,62],  burst:null,         fiber:.85,opacity:.9 },
-  { name:"Emerald",    inner:[150,200,96],  outer:[28,124,72],   ring:[10,42,26],  burst:[190,180,80], fiber:.85,opacity:.9 },
+  { name:"Emerald",    inner:[140,184,100], outer:[36,116,78],   ring:[10,42,26],  burst:[190,180,80], fiber:.85,opacity:.9 },
   { name:"Grey",       inner:[200,206,212], outer:[112,122,134], ring:[40,45,52],  burst:null,         fiber:.8, opacity:.9 },
   { name:"Amethyst",   inner:[190,160,228], outer:[104,72,166],  ring:[38,22,60],  burst:null,         fiber:.85,opacity:.9 },
   { name:"Honey",      inner:[236,178,78],  outer:[172,112,42],  ring:[62,36,10],  burst:null,         fiber:.85,opacity:.88 },
@@ -273,13 +274,17 @@ function makeProcedural(p, limbal){
     let R=mix(p.inner[0],p.outer[0],k), G=mix(p.inner[1],p.outer[1],k), B=mix(p.inner[2],p.outer[2],k);
     if(p.burst){ const ba=(1-smooth(.3,.62,rn))*(.45+.55*pnoise(T2,t))*.75;
       R=mix(R,p.burst[0],ba); G=mix(G,p.burst[1],ba); B=mix(B,p.burst[2],ba); }
-    const tex = 1 + (fib-.5)*1.1*p.fiber - crypt*.25*p.fiber;
+    const streak = Math.pow(pnoise(T4, t*1.0), 3);                   // thin dark radial furrows
+    const collar = Math.exp(-Math.pow((rn-.47)/.05,2))*(.6+.4*pnoise(T2,t));   // collarette: zig-zag ring around the pupil zone
+    const tex = 1 + (fib-.5)*1.25*p.fiber - crypt*.3*p.fiber - streak*.35*p.fiber - collar*.18;
     R*=tex; G*=tex; B*=tex;
-    const ring = smooth(.78,.97,rn)*limbal;
+    const ring = smooth(.8,.98,rn)*limbal*.5;
     R=mix(R,p.ring[0],ring); G=mix(G,p.ring[1],ring); B=mix(B,p.ring[2],ring);
     const speck=.94+.12*r();
     data[o]=R*speck; data[o+1]=G*speck; data[o+2]=B*speck;
-    data[o+3]=255*p.opacity*(p.fx?1:(.82+.18*fib));
+    const dots = smooth(.25,.75, pnoise(T4, t*3+rn*1.7)*.5 + pnoise(T2, t*2-rn*2.3)*.5);
+    const pr = (typeof S!=='undefined' && S.print!=null) ? S.print : .35;
+    data[o+3]=255*p.opacity*(p.fx?1:(.82+.18*fib)*(1-pr+pr*dots));
   }
   return data;
 }
@@ -319,6 +324,7 @@ function renderSwatches(){
 }
 function markActive(el){ sw.querySelectorAll(".sw").forEach(e=>e.classList.remove("active")); el.classList.add("active"); }
 renderSwatches(); rebuildLens();
+window.__S=S; window.__setPreset=i=>{ currentPreset=i; rebuildLens(); renderSwatches(); requestStill(); };   // test hook
 
 /* custom lens upload */
 function buildCustomLens(img){
@@ -361,13 +367,17 @@ class OneEuro{ constructor(minCutoff=1.2,beta=.04,dCutoff=1){Object.assign(this,
 // low smoothing at rest (no jitter), almost none during fast motion (no lag)
 // speeds are measured in iris radii per second: tracker noise (~1 r/s) gets heavy smoothing,
 // real head motion (5–30 r/s) opens the filter up so the lens doesn't lag
-const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(1,.4),uy:new OneEuro(1,.4),
+// tuned on a real head-shake recording: lens-to-pupil offset in motion 0.24 → 0.06 iris radii, no extra jitter at rest.
+// A fast derivative cutoff (md/pd/gd) lets the filter notice head motion within a frame or two instead of ~300 ms.
+const FP=Object.assign({mc:2.5,mb:2.5,md:5, gc:.7,gb:8,gd:4, uc:1,ub:1,ud:4, pc:1,pb:2.5,pd:5},
+  (()=>{try{return JSON.parse(new URLSearchParams(location.search).get('fp')||'{}')}catch(e){return {}}})());
+const filt=[0,1].map(()=>({cx:new OneEuro(1,.8,.6),cy:new OneEuro(1,.8,.6),rx:new OneEuro(.6,.3,.6),ry:new OneEuro(.6,.3,.6),ux:new OneEuro(FP.uc,FP.ub,FP.ud),uy:new OneEuro(FP.uc,FP.ub,FP.ud),
   pr:new OneEuro(.15,.02),op:new OneEuro(4,.5),ratio:new OneEuro(.2,0),
   // eye-anchored placement: corners follow the head fast; the iris position *inside* the eye is smoothed hard
-  mx:new OneEuro(1.5,.8,.6), my:new OneEuro(1.5,.8,.6), ew:new OneEuro(1,.5,.6), gu:new OneEuro(.7,4), gv:new OneEuro(.7,4)}));
+  mx:new OneEuro(FP.mc,FP.mb,FP.md), my:new OneEuro(FP.mc,FP.mb,FP.md), ew:new OneEuro(1,.5,FP.md), gu:new OneEuro(FP.gc,FP.gb,FP.gd), gv:new OneEuro(FP.gc,FP.gb,FP.gd)}));
 const ratioRaw=[null,null];
 const irisModel=[null,null], eyeVis=[1,1], eyeVisT=[null,null], eyeOff=[[0,0],[0,0]], eyeLast=[null,null];   // occlusion memory + slow pupil offset
-const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(1,.8,.6),new OneEuro(1,.8,.6)]));
+const polyFilt=[0,1].map(()=>Array.from({length:16},()=>[new OneEuro(FP.pc,FP.pb,FP.pd),new OneEuro(FP.pc,FP.pb,FP.pd)]));
 const PUPIL_PRIOR=.4;                                            // typical indoor pupil/iris ratio
 const pupilRaw=[null,null], pupilMem=[null,null], pupilShown=[null,null], offMem=[null,null], statMem=[{},{}];
 const resetFilters=()=>{ filt.forEach(f=>Object.values(f).forEach(o=>o.reset())); polyFilt.forEach(e=>e.forEach(p=>{p[0].reset();p[1].reset();}));
@@ -643,10 +653,15 @@ function applyLens(g, W, H){
     const vis=lid*smooth(.3,.7,gateMap[i])*openFade*occl;
     if(vis<=0.004) continue;
     const s=sampleTex(a*.5+.5,b*.5+.5,mip);
-    const pin=smooth(pupil-.03,pupil+.14,rn);                   // soft optic zone: lens fades in gradually from the pupil
-    let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.86,.99,rn))*pin;   // fade before the limbus (no glow on the sclera)
+    const pin=smooth(pupil-.02,pupil+.06,rn);                   // crisp pupil edge like a printed lens
+    let alpha=(s[3]/255)*vis*S.intensity*(1-smooth(.95,1,rn))*pin;    // cover the iris right out to the limbus
     let sh=Math.min(1.25,Math.max(.3,Lb[i]/irisL)); sh=1+(sh-1)*S.texture;  // natural shading; capped so sclera/skin can't brighten it
-    let nr=R+(s[0]*sh-R)*alpha, ng=G+(s[1]*sh-G)*alpha, nb=B+(s[2]*sh-B)*alpha;
+    // upper-lid shadow: the lid and lashes shade the top of a real iris
+    const lidSh=1-.28*smooth(-.25,-.95,b)*vis;
+    // limbal ring: darken (never brighten) toward the edge, so the lens reads as a lens and never glows on the sclera
+    const limb=1-S.limbal*.55*smooth(.8,.97,rn)*(1-smooth(.985,1,rn))*vis;
+    const tr=s[0]*sh*lidSh, tg=s[1]*sh*lidSh, tb=s[2]*sh*lidSh;
+    let nr=(R+(tr-R)*alpha)*limb, ng=(G+(tg-G)*alpha)*limb, nb=(B+(tb-B)*alpha)*limb;
     // fill the pupil with real pupil darkness so a small misalignment never shows a ring of the old iris
     const pa=(1-smooth(pupil-.1,pupil,rn))*vis*.35;              // only a light darkening right at the pupil
     if(pa>0){ nr+=(Math.min(nr,pupilRGB[0])-nr)*pa; ng+=(Math.min(ng,pupilRGB[1])-ng)*pa; nb+=(Math.min(nb,pupilRGB[2])-nb)*pa; }
