@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=02f206f";
+import { HATS, A, B } from "./hats.js?v=f17e986";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -40,10 +40,11 @@ const setStatus = (t, cls = "") => { statusEl.textContent = t; statusEl.classNam
 const S = { bright: 1, shadow: 0.6, occlude: true, debug: false, keyBg: true, tol: 38, tuck: 0, showOrig: false };
 const FIT_DEFAULT = { size: 1, y: 0, x: 0, tilt: 0, stretch: 1, curve: 0 };
 const FIT_KEYS = ["size", "y", "x", "tilt", "stretch", "curve"];
-const SIT = -0.11;          // default hat line at the forehead: head widths above (+) the top-of-forehead landmark
+const SIT = -0.08;          // default hat line at the forehead: head widths above (+) the top-of-forehead landmark
 const HAT_SCALE = 1.13;      // hats are modelled on the bare skull; hair makes the head bigger
 const CROWN_SCALE = 1.3;    // hat models are built low; real crowns are about 0.6 head widths tall
-let hairScale = HAT_SCALE, hairTop = null;   // hairTop: top of the hair above the ear line, in head widths   // the same, measured from the hair in the picture when the segmenter is available
+let hairScale = HAT_SCALE, hairTop = null;
+   // hairTop: top of the hair above the ear line, in head widths   // the same, measured from the hair in the picture when the segmenter is available
 const FOV_Y = 63 * Math.PI / 180;   // camera the face tracker assumes
 
 const hats = HATS.map(h => ({ ...h, base: { ...FIT_DEFAULT, ...h.fit }, fit: { ...FIT_DEFAULT, ...h.fit }, group: null }));
@@ -242,7 +243,7 @@ function renderSwatches() {
   }
 }
 function selectHat(h) {
-  hat = h;
+  hat = h; eyeLift = 0;
   sw.querySelectorAll(".sw").forEach(e => e.classList.remove("active")); h.el?.classList.add("active");
   $("customBox").style.display = h.custom ? "" : "none";
   $("colorRow").style.display = h.custom || h.model ? "none" : "";
@@ -477,7 +478,36 @@ function hairFit(seg, pose, W, H, smooth) {
 }
 
 /* ---------------- Render ---------------- */
+const TOUCH = matchMedia("(pointer: coarse)").matches, PHONE = TOUCH && Math.min(screen.width, screen.height) < 820;
+const MOVE_TIP = TOUCH ? "drag the hat to move it, pinch to resize" : "drag the hat to move it, scroll to resize";
 const _v = new THREE.Vector3();
+/* The hat's lowest points across its front (brim or visor edge), in the hat's own coordinates; found once per hat. */
+function frontEdge(h) {
+  if (h.frontPts) return h.frontPts;
+  h.group.updateMatrixWorld(true); const inv = h.group.matrixWorld.clone().invert(), v = new THREE.Vector3(), pts = [];
+  let zmax = 0, xmax = 0; h.group.traverse(o => { if (!o.isMesh) return; const P = o.geometry.attributes.position; for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld).applyMatrix4(inv); zmax = Math.max(zmax, v.z); xmax = Math.max(xmax, Math.abs(v.x)); pts.push(v.x, v.y, v.z); } });
+  const NB = 9, low = Array(NB).fill(null);
+  for (let i = 0; i < pts.length; i += 3) {
+    const x = pts[i], y = pts[i + 1], z = pts[i + 2]; if (z < 0.25 * zmax || Math.abs(x) > 0.5 * xmax) continue;
+    const b = Math.min(NB - 1, Math.floor((x / xmax + 0.5) * NB)); if (!low[b] || y < low[b].y) low[b] = new THREE.Vector3(x, y, z);
+  }
+  return (h.frontPts = low.filter(Boolean));
+}
+let eyeLift = 0;   // head widths the hat is raised to keep its front edge off the eyes (smoothed in live mode)
+/* Keep the eyes clear: wherever the head and camera are, the lowest point of the hat's front edge, as drawn, must stay a
+   gap above the upper eyelids. Measured in the image, so it covers a nod, a webcam above the eyes, a deep hat or a low
+   forehead estimate alike. Returns how far to raise the hat along the head (head widths). */
+function eyeClearance(pose, H, live) {
+  const L = pose.lm, w = pose.w, eyeTop = H - Math.min(L[159].y, L[386].y, L[160].y, L[385].y) * H;   // world y is up
+  const guard = eyeTop + 0.085 * w;
+  hatPivot.updateMatrixWorld(true);
+  let low = Infinity; for (const p of frontEdge(hat)) low = Math.min(low, _v.copy(p).applyMatrix4(hat.group.matrixWorld).y);
+  const up = Math.max(0.35, _v.set(0, 1, 0).applyQuaternion(headG.quaternion).y);
+  const need = Math.max(0, guard - low) / (w * up);
+  // live: lift at once, settle back slowly, so the hat never bobs over the eyes
+  eyeLift = !live ? need : need > eyeLift ? need : eyeLift + (need - eyeLift) * 0.12;
+  return eyeLift;
+}
 function clearView() { scene.background = null; headG.visible = false; renderer.setClearColor(0x08080a, 1); renderer.clear(); octx.clearRect(0, 0, ovl.width, ovl.height); }
 function render(source, W, H, pose) {
   if (cam.right !== W || cam.top !== H) { renderer.setSize(W, H, false); cam.right = W; cam.top = H; cam.updateProjectionMatrix(); MU.uRes.value.set(W, H); }
@@ -508,6 +538,7 @@ function render(source, W, H, pose) {
     if (!hat.custom && (!hat.model || hat.stretchCrown)) { const mt = hat.top * hairScale * F.size; cs = hairTop === null ? CROWN_SCALE : Math.min(CROWN_SCALE * 1.35, Math.max(CROWN_SCALE * 0.92, ((pose.h + 0.3) * 0.3 + hairTop * 0.7 + 0.03 - hatPivot.position.y) / (mt * Math.cos(tb)))); }
     const sn = hat.snug || 1;   // knits and caps stretch over the head; felt and straw hats sit a little proud of it
     hatPivot.scale.set(F.size * hairScale * sn, F.size * hairScale * F.stretch, F.size * hairScale * sn); MU.uCrown.value = cs;
+    headG.updateMatrixWorld(true); hatPivot.position.y += eyeClearance(pose, H, !!stream);
     /* A hat band is not level on a head: it crosses the mid-forehead in front but comes down to the tops of the ears at
        the sides, where the head curves away. Bend the lower edge down at the sides to the tops of the ears, fully for
        soft hats (hat.sides = 1), less for stiff ones; without it there is open space between the hat and the ears. */
@@ -629,6 +660,7 @@ function segment(source, t) {
 }
 
 /* ---------------- Camera ---------------- */
+let lastLiveSeg = null;
 let stream = null, lastVT = -1, fpsAvg = 0, lastT = 0, rafId = 0, mirrored = false, livePose = null, lastSeen = 0;
 const HOLD_MS = 250;   // how long the hat stays put when tracking drops out for a moment (blink, motion blur, hand)
 /* With other people in the picture, stay with the person already wearing the hat; otherwise take the biggest face
@@ -649,7 +681,7 @@ const frameCv = document.createElement("canvas"), frameCtx = frameCv.getContext(
 async function startCamera() {
   if (stream) { stopCamera(); return; }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: PHONE ? { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
   } catch (e) { setStatus("Camera blocked — allow access or open via http://localhost", "err"); return; }
   video.srcObject = stream; await video.play();
   await setMode("VIDEO"); resetFilters();
@@ -671,6 +703,8 @@ function loop() {
   rafId = requestAnimationFrame(loop);
   if (video.readyState < 2 || video.currentTime === lastVT) return;
   lastVT = video.currentTime;
+  // the camera's frame size can change after it starts (iOS reports it late, and turning a phone swaps width and height)
+  if (video.videoWidth && (video.videoWidth !== frameCv.width || video.videoHeight !== frameCv.height)) { frameCv.width = video.videoWidth; frameCv.height = video.videoHeight; resetFilters(); livePose = null; }
   const t = performance.now(), W = frameCv.width, H = frameCv.height;
   // freeze ONE frame: track and render on the same pixels, so the hat can't trail the head
   frameCtx.drawImage(video, 0, 0, W, H);
@@ -679,12 +713,15 @@ function loop() {
   if (lm) {
     if (pickFace.switched) resetFilters();
     livePose = headPose(lm, res.facialTransformationMatrixes && res.facialTransformationMatrixes[fi], W, H, t, true); lastSeen = t;
-    const seg = segmenter && (needMask() || segTick++ % 12 === 0) ? segment(frameCv, t) : null;
-    if (seg) hairFit(seg, livePose, W, H, true);
-    setMask(needMask() ? seg : null);
+    // the hair/face mask is the heaviest step: on a slow device (a phone) refresh it every 2nd or 3rd frame and reuse it between
+    const every = !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
+    const want = needMask() ? segTick++ % every === 0 : segTick++ % 12 === 0;
+    const seg = segmenter && want ? segment(frameCv, t) : null;
+    if (seg) { hairFit(seg, livePose, W, H, true); lastLiveSeg = seg; }
+    setMask(needMask() ? seg || lastLiveSeg : null);
   } else if (!livePose || t - lastSeen > HOLD_MS) { livePose = null; resetFilters(); }   // a missed frame or two: keep the hat where it was
   render(frameCv, W, H, livePose);
-  $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · drag the hat to move it, scroll to resize" : "No face found. Face the camera and keep your whole head in frame.";
+  $("hint").textContent = livePose ? "Tracking · " + poseText(livePose) + " · " + MOVE_TIP : "No face found. Face the camera and keep your whole head in frame.";
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps"; }
   lastT = t;
 }
@@ -711,7 +748,7 @@ function refreshStill() {
   if (segmenter && stillSeg === null) { stillSeg = (stillPose && segment(still, 0)) || false; if (stillSeg) hairFit(stillSeg, stillPose, still.width, still.height, false); }   // false: tried, nothing to use
   if (!stillSeg) { hairScale = HAT_SCALE; hairTop = null; }
   setMask(needMask() && stillSeg ? stillSeg : null);
-  $("hint").textContent = stillPose ? "Face found · " + poseText(stillPose) + " · drag the hat to move it, scroll to resize" : "No face found. Try a clearer photo with the whole head visible.";
+  $("hint").textContent = stillPose ? "Face found · " + poseText(stillPose) + " · " + MOVE_TIP : "No face found. Try a clearer photo with the whole head visible.";
   requestStill();
 }
 $("photoIn").addEventListener("change", e => {
@@ -731,12 +768,27 @@ function requestStill() {
   });
 }
 
-/* ---------------- Drag to move, scroll to resize ---------------- */
+/* ---------------- Drag to move; scroll or pinch to resize ---------------- */
 let drag = null;
+const touches = new Map();   // pointers down on the picture: one drags the hat, two pinch to resize it
+let pinch = null;
 const curPose = () => stream ? livePose : stillPose;
-vp.addEventListener("pointerdown", e => { if (curPose() && e.target === out) { drag = { x: e.clientX, y: e.clientY }; vp.setPointerCapture(e.pointerId); } });
+const pinchDist = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+vp.addEventListener("pointerdown", e => {
+  if (!curPose() || e.target !== out) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); vp.setPointerCapture(e.pointerId);
+  if (touches.size === 2) { drag = null; pinch = { d: pinchDist(), size: hat.fit.size }; }
+  else if (touches.size === 1) drag = { x: e.clientX, y: e.clientY };
+});
 vp.addEventListener("pointermove", e => {
-  const p = curPose(); if (!drag || !p) return;
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const p = curPose(); if (!p) return;
+  if (pinch && touches.size === 2) {
+    const el = $("size"); hat.fit.size = Math.min(+el.max, Math.max(+el.min, pinch.size * pinchDist() / Math.max(10, pinch.d)));
+    syncFitUI(); requestStill(); return;
+  }
+  if (!drag) return;
   const b = out.getBoundingClientRect(), s = 1 / Math.min(b.width / out.width, b.height / out.height);
   const dx = (e.clientX - drag.x) * s * (mirrored ? -1 : 1), dy = (e.clientY - drag.y) * s;
   drag = { x: e.clientX, y: e.clientY };
@@ -745,7 +797,10 @@ vp.addEventListener("pointermove", e => {
   hat.fit.y = clamp(hat.fit.y + (dx * sr - dy * cr) / p.w, $("y"));
   syncFitUI(); requestStill();
 });
-for (const ev of ["pointerup", "pointercancel"]) vp.addEventListener(ev, () => { drag = null; });
+for (const ev of ["pointerup", "pointercancel"]) vp.addEventListener(ev, e => {
+  touches.delete(e.pointerId); if (touches.size < 2) pinch = null;
+  if (touches.size === 1) { const [q] = touches.values(); drag = { x: q.x, y: q.y }; } else drag = null;   // lifting one finger of a pinch: carry on dragging
+});
 vp.addEventListener("wheel", e => {
   if (!curPose()) return; e.preventDefault();
   const el = $("size"); hat.fit.size = Math.min(+el.max, Math.max(+el.min, hat.fit.size * Math.exp(-e.deltaY * 0.001)));
@@ -757,9 +812,15 @@ $("snapBtn").onclick = () => {
   const c = document.createElement("canvas"); c.width = out.width; c.height = out.height; const x = c.getContext("2d");
   if (mirrored) { x.translate(c.width, 0); x.scale(-1, 1); }
   x.drawImage(out, 0, 0);
-  const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = "hat-tryon.png"; a.click();
+  c.toBlob(async blob => {
+    const file = new File([blob], "hat-tryon.png", { type: "image/png" });
+    if (PHONE && navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: "Hat try-on" }); return; } catch (e) { if (e.name === "AbortError") return; } }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "hat-tryon.png"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, "image/png");
 };
 
+if (matchMedia("(max-width: 760px)").matches) $("settings").open = false;   // phones: the picture and hats first, settings folded
+if (TOUCH) $("hint").textContent = "Tip: drag the hat to move it, pinch to resize it.";
 renderSwatches(); selectHat(hat);
 window.hatTryOn = { get pose() { return curPose(); }, get hat() { return hat; }, get hairScale() { return hairScale; }, get hairTop() { return hairTop; }, light, hats, S };   // for debugging from the console
 init();

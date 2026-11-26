@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
 <title>Hat Try-On — Live Virtual Hat Preview</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='23' rx='15' ry='4' fill='%237c9cff'/%3E%3Cpath d='M7 23c0-12 3-17 9-17s9 5 9 17z' fill='%235b7be0'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -71,6 +72,50 @@
   .upload:hover{border-color:var(--accent);color:var(--text)}
   input[type=file]{display:none}
   .foot{color:var(--muted);font-size:11.5px;line-height:1.5}
+
+  /* settings fold: open beside the picture on a laptop, folded under it on a phone */
+  details#settings{display:flex;flex-direction:column;gap:18px}
+  details#settings>summary{display:none}
+  details#settings>div{margin-top:0}
+  button,.btn,.sw{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+
+  /* ---------- phones ---------- */
+  @media (max-width:760px){
+    body{font-size:15px}
+    header{padding:10px max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));position:sticky;top:0;z-index:5;background:rgba(13,15,20,.92);backdrop-filter:blur(8px)}
+    .brand{font-size:15px} .brand svg{width:22px;height:22px}
+    .status{gap:6px;font-size:12px} .pill{padding:3px 8px}
+    main{display:flex;flex-direction:column;gap:12px;height:auto;padding:10px max(10px,env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
+    aside{display:contents}
+    .stage{order:0;gap:10px}
+    /* the picture fills most of the screen at the camera's shape (portrait on a phone held upright) */
+    .viewport{flex:none;height:min(68svh,calc(100vw * 1.34));min-height:300px;border-radius:12px}
+    .empty h2{font-size:19px} .empty p{font-size:14px}
+    .stagebar{flex-direction:column;align-items:stretch;gap:8px}
+    .stagebar .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .stagebar .row>*{justify-content:center;min-height:46px;font-size:15px}
+    #modelPick{grid-column:1/-1}
+    .hint{font-size:12.5px;text-align:center}
+    #hatsBox{order:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 0 12px 12px}
+    #hatsBox h3{padding-right:12px}
+    .swatches{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 12px 6px 0;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .swatches::-webkit-scrollbar{display:none}
+    .sw{flex:0 0 78px;scroll-snap-align:start;padding:6px 2px}
+    .sw canvas{width:64px;height:64px}
+    .sw span{font-size:12px}
+    #hatsBox .upload,#hatsBox .toggle{margin-right:12px}
+    .upload{padding:12px;font-size:13px}
+    details#settings{order:2;display:block;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 14px}
+    details#settings>summary{display:flex;justify-content:space-between;align-items:center;min-height:50px;font-weight:600;cursor:pointer;list-style:none}
+    details#settings>summary::-webkit-details-marker{display:none}
+    details#settings>summary::after{content:"";width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-3px);transition:transform .2s}
+    details#settings[open]>summary::after{transform:rotate(-135deg) translateX(-3px)}
+    details#settings>div{padding-bottom:14px}
+    details#settings>div+div{border-top:1px solid var(--line);padding-top:14px}
+    input[type=range]{height:30px}
+    .toggle{min-height:40px}
+    .foot{order:3;padding:0 4px}
+  }
 </style>
 </head>
 <body>
@@ -104,12 +149,12 @@
         <button id="cmpBtn" disabled title="Hold to see the picture without the hat">Hold to compare</button>
         <label class="btn" for="modelIn" id="modelPick" style="display:none">Load model file (.task)</label>
       </div>
-      <div class="hint" id="hint">Tip: drag the hat to move it, scroll to resize it.</div>
+      <div class="hint" id="hint">Tip: drag the hat to move it, scroll or pinch to resize it.</div>
     </div>
   </section>
 
   <aside>
-    <div>
+    <div id="hatsBox">
       <h3>Hats</h3>
       <div class="swatches" id="swatches"></div>
       <label class="upload" for="hatIn">＋ Upload your own hat image (PNG/JPG product photo)</label>
@@ -117,6 +162,8 @@
       <div class="toggle" id="colorRow" style="margin-top:8px">Hat colour <input type="color" id="color"></div>
     </div>
 
+    <details id="settings" open>
+    <summary>Adjust fit &amp; look</summary>
     <div>
       <h3>Fit <button class="small" id="resetBtn">Reset</button></h3>
       <div class="ctl"><label>Size <b id="v_size"></b></label><input type="range" id="size" min="0.6" max="1.8" step="0.01"></div>
@@ -145,6 +192,7 @@
       <div class="toggle">Hide the hat's back behind forehead and hair <input type="checkbox" id="occlude" checked></div>
       <div class="toggle">Show tracking overlay <input type="checkbox" id="debug"></div>
     </div>
+    </details>
 
     <div class="foot">
       Runs fully in your browser. MediaPipe Face Landmarker tracks head position, size and rotation (roll, yaw, pitch); a segmentation model finds face and hair so the far side of the hat goes behind your head. No images leave your device.
@@ -159,6 +207,6 @@
 <input type="file" id="glbIn" accept=".glb,model/gltf-binary">
 <input type="file" id="modelIn" accept=".task,application/octet-stream">
 
-<script type="module" src="./app.js?v=02f206f"></script>
+<script type="module" src="./app.js?v=f17e986"></script>
 </body>
 </html>
