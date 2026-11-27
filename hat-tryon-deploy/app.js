@@ -2,8 +2,8 @@ import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { MeshoptDecoder } from "./vendor/meshopt_decoder.module.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=d07d693";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=d07d693";
+import { HATS, A, B } from "./hats.js?v=fb69c5a";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=fb69c5a";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -722,6 +722,36 @@ async function createTask(make, order = ["GPU", "CPU"]) {
   }
   throw lastErr;
 }
+/* Phones: tracking and the hair mask run in two workers, each with its own copy of MediaPipe. The page doesn't need
+   copies of its own for live use, so it makes them only for a photo (or if a worker fails): two engines instead of
+   four, both compiling at the same time, and the camera is ready as soon as the tracker is. */
+let faceModelBytes = null, segModelBytes = null, mainTasks = null;
+async function phoneInit() {
+  setStatus("Loading models…");
+  const [face, seg] = await Promise.all([fetchModel(FACE_MODEL_URLS, 1e6), fetchModel(SEG_MODEL_URLS, 1e6).catch(() => null)]);
+  faceModelBytes = face; segModelBytes = seg;
+  startTrackWorker(face.slice()); if (seg) startSegWorker(seg.slice());
+  if (!(await trackWorkerReady)) return false;            // no tracking worker here: the usual set-up on the page
+  mode = "VIDEO";
+  setStatus("Model ready", "ok"); statusEl.title = "";
+  $("camBtn").disabled = false; $("camBtn2").disabled = false; $("modelPick").style.display = "none";
+  if (pendingPhoto) { const p = pendingPhoto; pendingPhoto = null; loadPhoto(p); } else autoStart();
+  return true;
+}
+function ensureMainTasks() {   // the page's own tracker and segmenter (photos on phones), made once
+  if (landmarker) return Promise.resolve();
+  if (!mainTasks) mainTasks = (async () => {
+    setStatus("Preparing photo mode…");
+    landmarker = await createTask((fs, d) => FaceLandmarker.createFromOptions(fs, {
+      baseOptions: { modelAssetBuffer: faceModelBytes, delegate: d }, runningMode: "IMAGE", numFaces: 3, outputFacialTransformationMatrixes: true }));
+    if (segModelBytes) try {
+      segmenter = await createTask((fs, d) => ImageSegmenter.createFromOptions(fs, {
+        baseOptions: { modelAssetBuffer: segModelBytes, delegate: d }, runningMode: "IMAGE", outputCategoryMask: false, outputConfidenceMasks: true }), ["CPU"]);
+    } catch (e) { console.warn("Hair segmentation unavailable for photos:", e); }
+    mode = "IMAGE"; setStatus("Model ready", "ok");
+  })();
+  return mainTasks;
+}
 async function init(localModel) {
   // the head-shape model is small (~100 KB) and optional: load it alongside, carry on without it
   loadHeadModel(new URL("./models/headshape", import.meta.url).href).then(m => {
@@ -729,6 +759,7 @@ async function init(localModel) {
     if (still && stillPose) { headFeed(stillPose.lm, still.width, still.height, stillPose, 1); requestStill(); }
   }).catch(e => console.warn("Head shape model unavailable, using the average head:", e));
   try {
+    if (PHONE && !localModel && FaceLandmarker && window.Worker && window.createImageBitmap && await phoneInit()) return;
     if (!FaceLandmarker) throw new Error(LOCAL ? "Could not load MediaPipe from ./vendor or any CDN"
       : "Opened as a file and the CDNs are unreachable. Serve this folder over http://localhost instead");
     setStatus("Loading face model…");
@@ -765,24 +796,28 @@ $("modelIn").addEventListener("change", async e => {
 });
 async function setMode(m) {
   if (mode === m) return;
+  if (!landmarker) { mode = m; return; }   // phones: the page's own tasks are only made for photos
   await landmarker.setOptions({ runningMode: m }); if (segmenter) await segmenter.setOptions({ runningMode: m });
   mode = m;
 }
 /* face + hair masks for one frame; only needed when the hat has a part that goes behind the head */
-const needMask = () => !!segmenter && ((S.occlude && !!(hat.brim || hat.custom)) || S.shadow > 0);   // the shadow also needs it: only the person takes it
+const hasSeg = () => !!segmenter || segWorkerOn;
+const needMask = () => hasSeg() && ((S.occlude && !!(hat.brim || hat.custom)) || S.shadow > 0);   // the shadow also needs it: only the person takes it
 let segTick = 0;
 /* Phones: the hair mask runs in a worker, so the camera and the hat never wait for it.
    Each mask is placed with the head pose of the frame it was made from; maskFollow moves it with the head until the next one. */
 let segWorker = null, segWorkerOn = false, segBusy = false, segId = 0, segSent = 0;
 const segPoses = new Map();
+let segWorkerReady = Promise.resolve(false), trackWorkerReady = Promise.resolve(false);
 function startSegWorker(model) {
   if (!window.Worker || !window.createImageBitmap) return;
+  let done; segWorkerReady = new Promise(r => { done = r; });
   try { segWorker = new Worker(new URL("./seg-worker.js" + new URL(import.meta.url).search, import.meta.url)); }
   catch (e) { console.warn("Mask worker unavailable:", e); return; }
   segWorker.onmessage = (e) => {
     const m = e.data;
-    if (m.type === "ready") { segWorkerOn = true; delegates.push("worker-" + m.delegate); }
-    else if (m.type === "fail") { console.warn("Mask worker failed, masks stay on the main thread:", m.msg); segWorker.terminate(); segWorker = null; }
+    if (m.type === "ready") { segWorkerOn = true; delegates.push("worker-" + m.delegate); done(true); }
+    else if (m.type === "fail") { console.warn("Mask worker failed, masks stay on the main thread:", m.msg); segWorker.terminate(); segWorker = null; done(false); }
     else if (m.type === "error") { console.warn("Mask worker:", m.msg); }
     else if (m.type === "mask") {
       segBusy = false; prof.seg = prof.seg * 0.8 + (performance.now() - segSent) * 0.2;
@@ -838,12 +873,13 @@ let trackWorker = null, trackOn = false, trackBusy = false, trackId = 0, trackSe
 const vel = { x: 0, y: 0 };
 function startTrackWorker(model) {
   if (!window.Worker || !window.createImageBitmap) return;
+  let done; trackWorkerReady = new Promise(r => { done = r; });
   try { trackWorker = new Worker(new URL("./track-worker.js" + new URL(import.meta.url).search, import.meta.url)); }
   catch (e) { console.warn("Tracking worker unavailable:", e); return; }
   trackWorker.onmessage = (e) => {
     const m = e.data;
-    if (m.type === "ready") { trackOn = true; delegates.push("track-" + m.delegate); }
-    else if (m.type === "fail") { console.warn("Tracking worker failed, tracking stays on the main thread:", m.msg); trackWorker.terminate(); trackWorker = null; }
+    if (m.type === "ready") { trackOn = true; delegates.push("track-" + m.delegate); done(true); }
+    else if (m.type === "fail") { console.warn("Tracking worker failed, tracking stays on the main thread:", m.msg); trackWorker.terminate(); trackWorker = null; done(false); }
     else if (m.type === "error") console.warn("Tracking worker:", m.msg);
     else if (m.type === "res") {
       trackBusy = false; prof.track = prof.track * 0.8 + (performance.now() - trackSent) * 0.2;
@@ -1001,7 +1037,7 @@ function loop() {
     if (!trackBusy) sendTrack(t);
     livePose = predictPose(t, W, H);
     if (livePose && segWorkerOn) {
-      if (segmenter && (needMask() || segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
+      if (needMask() || (hasSeg() && segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
       setMask(needMask() ? lastLiveSeg : null, livePose); maskFollow(livePose);
     } else if (!livePose) MU.uMaskOn.value = 0;
   } else {
@@ -1015,7 +1051,7 @@ function loop() {
     const every = PHONE ? (!fpsAvg || fpsAvg > 20 ? 3 : fpsAvg > 13 ? 5 : 8) : !fpsAvg || fpsAvg > 24 ? 1 : fpsAvg > 15 ? 2 : 3;
     const want = needMask() ? segTick++ % every === 0 : segTick++ % 12 === 0;
     if (segWorkerOn) {   // phone: masks arrive from the worker, nothing here waits for them
-      if (segmenter && (needMask() || segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
+      if (needMask() || (hasSeg() && segTick++ % 12 === 0)) segAsync(frameCv, livePose, t);
       setMask(needMask() ? lastLiveSeg : null, livePose); maskFollow(livePose);
     } else {
     const t1 = performance.now(), seg = segmenter && want ? segment(segSmall(frameCv), t) : null; if (seg) prof.seg = prof.seg * 0.8 + (performance.now() - t1) * 0.2;
@@ -1029,6 +1065,9 @@ function loop() {
   if (lastT) { const f = 1000 / (t - lastT); fpsAvg = fpsAvg ? fpsAvg * 0.9 + f * 0.1 : f; fpsEl.textContent = fpsAvg.toFixed(0) + " fps" + (DEBUG ? ` · track ${prof.track | 0} · mask ${prof.seg | 0} · draw ${prof.render | 0} ms · ${W}x${H} · ${delegates.join("/")} · head ${headFitter?.result ? `depth ${((headTarget.kz - 1) * 100).toFixed(0)}% crown ${(headTarget.dTop * 100).toFixed(1)}` : headFitter ? Math.round(headFitter.progress * 100) + "%" : "-"}` : ""); }
   lastT = t;
 }
+/* after the first visit, models and libraries come from the device (sw.js) */
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost") && !/[?&]nosw/.test(location.search))
+  navigator.serviceWorker.register("./sw.js").catch(e => console.warn("No offline cache:", e));
 $("camBtn").onclick = startCamera; $("camBtn2").onclick = startCamera; $("flipBtn").onclick = flipCamera;
 /* camera already allowed for this site (Chrome, Android, Safari once set to Allow): start it straight away */
 async function autoStart() {
@@ -1040,6 +1079,7 @@ async function autoStart() {
 /* ---------------- Photo ---------------- */
 let still = null, stillPose = null, stillSeg = null, pendingPhoto = null;
 async function loadPhoto(img) {
+  if (!landmarker && faceModelBytes) await ensureMainTasks();
   if (!landmarker) { pendingPhoto = img; return; }
   if (stream) stopCamera();
   const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));

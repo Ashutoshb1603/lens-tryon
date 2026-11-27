@@ -81,3 +81,12 @@ stores its weights as 8-bit on phones (CPU) and 16-bit on desktops (GPU) — `to
 model bundle leaves out the unused blendshapes model; hats are simplified and meshopt-compressed (11.4 → 2.4 MB),
 only the selected hat loads at start (the others download in the background), and the hat picker shows small
 pre-rendered thumbnails (`models/thumbs`).
+
+## Speed on phones
+
+- Tracking and the hair mask run in two workers; the page makes its own MediaPipe tasks only for photo uploads
+  (two engines instead of four, compiled in parallel; the camera is ready as soon as the tracker is).
+- One face is tracked on phones (looking for a second one re-runs the face detector every frame); frames go to the
+  workers straight from the camera; the mask runs ~4×/s and follows the head in between.
+- `sw.js` keeps models, the MediaPipe engine, three.js and the hats on the device after the first visit
+  (refreshed in the background); the page and the app's code always come from the network first.
