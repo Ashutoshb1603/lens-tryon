@@ -11,7 +11,7 @@ self.onmessage = async (e) => {
         for (const wasm of m.wasm) {
           let fs;
           try { fs = await FilesetResolver.forVisionTasks(wasm); } catch (err) { lastErr = "wasm: " + err; continue; }
-          for (const delegate of ["CPU", "GPU"]) {   // CPU first: the GPU is busy with the face tracker and the hat
+          for (const delegate of ["CPU"]) {   // CPU only: the GPU is busy with the face tracker and the hat, and the phone model has 8-bit weights the GPU path can't run
             try {
               seg = await ImageSegmenter.createFromOptions(fs, {
                 baseOptions: { modelAssetBuffer: m.model, delegate }, runningMode: "VIDEO",

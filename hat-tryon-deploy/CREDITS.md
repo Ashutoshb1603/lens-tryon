@@ -44,3 +44,10 @@ calibrated on real MediaPipe landmarks (`tools/calibrate_headshape.py`). Licence
     SOFTWARE.
 
 MediaPipe's canonical face model (Apache 2.0) was used only to build it and is not shipped.
+
+### Changes to the hat models
+
+The hat models above were optimised for the web: meshes simplified (meshoptimizer, within a small error bound),
+geometry compressed (EXT_meshopt_compression), textures re-encoded as WebP (the Bowler's at 512 px). Thumbnails in
+`models/thumbs` are renders of these models. The segmentation model's weights are stored as 16-bit / 8-bit
+(`tools/shrink_tflite.py`); the face model bundle omits the unused blendshapes model.

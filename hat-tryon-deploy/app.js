@@ -1,8 +1,9 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { MeshoptDecoder } from "./vendor/meshopt_decoder.module.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=1c01eba";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=1c01eba";
+import { HATS, A, B } from "./hats.js?v=d07d693";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=d07d693";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -25,8 +26,12 @@ const FACE_MODEL_URLS = [
   "./models/face_landmarker.task",
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
 ];
+/* The hair / face / ear segmentation model, with its weights stored smaller (tools/shrink_tflite.py): phones run it on
+   the CPU, which takes 8-bit weights (4.4 MB, masks within 0.2% of the original); desktops run it on the GPU, which
+   needs 16-bit (8.3 MB, identical masks). The original is 16.4 MB. */
+const SEG_ON_CPU = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 820;   // = PHONE (declared later)
 const SEG_MODEL_URLS = [
-  "./models/selfie_multiclass_256x256.tflite",
+  SEG_ON_CPU ? "./models/selfie_multiclass_256x256_int8.tflite" : "./models/selfie_multiclass_256x256_fp16.tflite",
   "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
 ];
 
@@ -49,7 +54,7 @@ let hairScale = HAT_SCALE, hairTop = null;
 const FOV_Y = 63 * Math.PI / 180;   // camera the face tracker assumes
 
 const hats = HATS.map(h => ({ ...h, base: { ...FIT_DEFAULT, ...h.fit }, fit: { ...FIT_DEFAULT, ...h.fit }, group: null }));
-let hat = hats[0];
+let hat = hats[0], pendingHat = null;
 
 /* ---------------- 3D scene ----------------
    World: frame pixels, x right, y up, z towards the camera, seen through an orthographic camera. The head is a group at
@@ -224,10 +229,10 @@ function fitModel(obj, o = {}) {
   });
   return { group: g, brim: band > 0, top: (y1 - y0) * k };
 }
-const gltf = new GLTFLoader();
+const gltf = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);   // the hats ship meshopt-compressed (about a quarter of the size)
 // uploaded files may only use what is inside them: no requests to addresses named in the file
 const sealed = new THREE.LoadingManager(); sealed.setURLModifier(u => /^(data|blob):/i.test(u) ? u : "data:,");
-const gltfUpload = new GLTFLoader(sealed);
+const gltfUpload = new GLTFLoader(sealed).setMeshoptDecoder(MeshoptDecoder);
 function adoptModel(h, scene3) {
   const f = fitModel(scene3, h.fitModel); if (!f) throw new Error("no meshes in the file");
   h.group = f.group; h.top = f.top; if (h.brim === undefined) h.brim = f.brim;
@@ -259,7 +264,7 @@ function customHat(h) {
   return grp;
 }
 /* swatch pictures: the hat alone, rendered off screen */
-const TH = 160, thumbRT = new THREE.WebGLRenderTarget(TH, TH, { samples: 4 }), thumbScene = new THREE.Scene();
+const TH = 192, thumbRT = new THREE.WebGLRenderTarget(TH, TH, { samples: 4 }), thumbScene = new THREE.Scene();
 const thumbCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 20); thumbCam.position.set(0, 0.9, 5); thumbCam.lookAt(0, 0.15, 0);
 { const d = new THREE.DirectionalLight(0xffffff, 2.4); d.position.set(-1.5, 3, 3); thumbScene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.6), d); }
 const thumbPx = new Uint8Array(TH * TH * 4);
@@ -280,17 +285,43 @@ function thumb(h, cv) {
   g.drawImage(t, 0, 0, cv.width, cv.height);
 }
 const sw = $("swatches");
+/* The built-in hats show a pre-rendered picture (models/thumbs, a few KB each) and their 3D model is downloaded only
+   when needed: the selected hat first, the rest quietly once the app is up. Uploaded hats are drawn live. */
+const thumbOf = h => h.url.replace("models/hats/", "models/thumbs/").replace(/[^/]*\.glb$/, h.name.toLowerCase().replace(/\s+/g, "_") + ".webp");
+function loadHat(h) {
+  if (!h.model || h.group || h.custom) return Promise.resolve(h);
+  if (!h.loading) h.loading = new Promise((res, rej) => gltf.load(h.url, r => { adoptModel(h, r.scene); res(h); },
+    undefined, e => { h.loading = null; console.warn("Could not load " + h.url, e); rej(e); }));
+  return h.loading;
+}
 function renderSwatches() {
   sw.innerHTML = "";
   for (const h of hats) {
-    if (!h.group) { if (h.model) continue; buildHat(h); }
+    if (!h.group && !h.model) buildHat(h);
     const el = document.createElement("div"); el.className = "sw" + (h === hat ? " active" : "");
-    const cv = document.createElement("canvas"); cv.width = cv.height = 120; thumb(h, cv);
+    let pic;
+    if (h.model && !h.custom && h.url && !h.url.startsWith("blob:")) { pic = new Image(); pic.src = thumbOf(h); pic.alt = ""; pic.decoding = "async"; }
+    else { pic = document.createElement("canvas"); pic.width = pic.height = 192; thumb(h, pic); }
     const sp = document.createElement("span"); sp.textContent = h.name;
-    el.append(cv, sp); el.onclick = () => selectHat(h); h.el = el; sw.append(el);
+    el.append(pic, sp); el.onclick = () => selectHat(h); h.el = el; sw.append(el);
   }
 }
+let prefetching = false;
+function prefetchHats() {   // the others, one at a time, when the browser is idle; not on a data-saver connection
+  if (prefetching || navigator.connection?.saveData) return; prefetching = true;
+  const next = () => { const h = hats.find(x => x.model && !x.group && !x.loading && !x.failed); if (!h) return;
+    (window.requestIdleCallback || setTimeout)(() => loadHat(h).catch(() => { h.failed = true; }).finally(next), { timeout: 3000 }); };
+  next();
+}
 function selectHat(h) {
+  if (h.model && !h.group) {   // not downloaded yet: show it loading, switch when it arrives
+    h.el?.classList.add("loading");
+    loadHat(h).then(() => { h.el?.classList.remove("loading"); if (pendingHat === h) { pendingHat = null; selectHat(h); } })
+      .catch(() => { h.el?.classList.remove("loading"); $("hint").textContent = "Couldn't load " + h.name + ". Check the connection and tap it again."; });
+    pendingHat = h; sw.querySelectorAll(".sw").forEach(e => e.classList.remove("active")); h.el?.classList.add("active");
+    return;
+  }
+  pendingHat = null;
   hat = h; eyeLift = 0;
   sw.querySelectorAll(".sw").forEach(e => e.classList.remove("active")); h.el?.classList.add("active");
   $("customBox").style.display = h.custom ? "" : "none";
@@ -380,7 +411,8 @@ function setCustom(img, keepFit) {
   h.cut = cut; buildHat(h); hat = h; renderSwatches(); selectHat(h);
 }
 /* 3D hat files: the built-in scans, and the user's own .glb */
-for (const h of hats) if (h.model) gltf.load(h.url, r => { adoptModel(h, r.scene); renderSwatches(); requestStill(); }, undefined, e => console.warn("Could not load " + h.url, e));
+renderSwatches();
+loadHat(hat).then(() => { requestStill(); setTimeout(prefetchHats, 2500); }).catch(() => prefetchHats());
 $("glbIn").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
@@ -678,12 +710,12 @@ async function fetchModel(urls, minSize) {
   throw new Error("Model download failed → " + errs.join(" | "));
 }
 const delegates = [];   // GPU or CPU, per task: shown by ?debug
-async function createTask(make) {
+async function createTask(make, order = ["GPU", "CPU"]) {
   let lastErr;
   for (const w of WASM_URLS) {
     let fs;
     try { fs = await FilesetResolver.forVisionTasks(w); } catch (e) { lastErr = new Error("WASM load failed: " + e.message); continue; }
-    for (const d of ["GPU", "CPU"]) {
+    for (const d of order) {
       try { const t = await make(fs, d); delegates.push(d); return t; }
       catch (e) { console.warn(d + " delegate failed:", e); lastErr = new Error(d + " init failed: " + (e.message || e)); }
     }
@@ -709,7 +741,8 @@ async function init(localModel) {
     try {
       const segModel = await fetchModel(SEG_MODEL_URLS, 1e6);
       segmenter = await createTask((fs, d) => ImageSegmenter.createFromOptions(fs, {
-        baseOptions: { modelAssetBuffer: segModel, delegate: d }, runningMode: "VIDEO", outputCategoryMask: false, outputConfidenceMasks: true }));
+        baseOptions: { modelAssetBuffer: segModel, delegate: d }, runningMode: "VIDEO", outputCategoryMask: false, outputConfidenceMasks: true }),
+        SEG_ON_CPU ? ["CPU"] : ["GPU", "CPU"]);
       const warm = document.createElement("canvas"); warm.width = warm.height = 64; warm.getContext("2d").fillRect(0, 0, 64, 64);
       segmenter.segmentForVideo(warm, performance.now(), () => {});   // compile shaders now, not on the first hat with a brim
       if (PHONE) startSegWorker(segModel.slice());

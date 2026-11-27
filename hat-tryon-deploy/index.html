@@ -63,7 +63,9 @@
   .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .sw{display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;padding:6px 2px;border-radius:10px;
     border:1px solid transparent}
-  .sw canvas{width:60px;height:60px;border-radius:10px;background:linear-gradient(#e9e4dd,#cfc8be)}
+  .sw canvas,.sw img{width:60px;height:60px;border-radius:10px;background:linear-gradient(#e9e4dd,#cfc8be);object-fit:contain}
+  .sw.loading canvas,.sw.loading img{animation:swload 1s ease-in-out infinite}
+  @keyframes swload{50%{opacity:.45}}
   .sw span{font-size:11.5px;color:var(--muted);text-align:center;line-height:1.2}
   .sw.active{border-color:var(--accent);background:rgba(124,156,255,.08)}
   .sw.active span{color:var(--text)}
@@ -112,7 +114,7 @@
     /* every hat in view at once: a grid, not a sideways strip with hidden hats */
     .swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
     .sw{padding:6px 0;min-width:0}
-    .sw canvas{width:min(64px,100%);height:auto;aspect-ratio:1}
+    .sw canvas,.sw img{width:min(64px,100%);height:auto;aspect-ratio:1}
     .sw span{font-size:12px}
     .upload{padding:12px;font-size:13px}
     details#settings{order:2;display:block;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 14px}
@@ -224,6 +226,6 @@
 <input type="file" id="glbIn" accept=".glb,model/gltf-binary">
 <input type="file" id="modelIn" accept=".task,application/octet-stream">
 
-<script type="module" src="./app.js?v=1c01eba"></script>
+<script type="module" src="./app.js?v=d07d693"></script>
 </body>
 </html>

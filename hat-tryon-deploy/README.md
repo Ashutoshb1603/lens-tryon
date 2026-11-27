@@ -73,3 +73,11 @@ then `python3 tools/calibrate_headshape.py models/headshape <aligned landmarks o
 - Flip camera (front / back; the back camera isn't mirrored), Take photo (opens the phone camera), Upload photo.
 - The camera comes back by itself after the app was in the background; the screen stays awake while live.
 - Installable: Share → Add to Home Screen (iPhone) or ⋮ → Install app (Android) opens it full-screen with its icon.
+
+## Download size
+
+About 10 MB on phones and 13.5 MB on desktops until the app is ready (it was ~32 MB): the segmentation model
+stores its weights as 8-bit on phones (CPU) and 16-bit on desktops (GPU) — `tools/shrink_tflite.py`; the face
+model bundle leaves out the unused blendshapes model; hats are simplified and meshopt-compressed (11.4 → 2.4 MB),
+only the selected hat loads at start (the others download in the background), and the hat picker shows small
+pre-rendered thumbnails (`models/thumbs`).
