@@ -1,8 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=ef02f4e";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=ef02f4e";
+import { HATS, A, B } from "./hats.js?v=1c01eba";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=1c01eba";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
@@ -702,7 +702,7 @@ async function init(localModel) {
     setStatus("Loading face model…");
     const model = localModel || await fetchModel(FACE_MODEL_URLS, 1e6);
     const lmk = await createTask((fs, d) => FaceLandmarker.createFromOptions(fs, {
-      baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numFaces: PHONE ? 2 : 3,
+      baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numFaces: PHONE ? 1 : 3,   // phones: looking for a 2nd face re-runs the face detector every frame
       outputFacialTransformationMatrixes: true,
       minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5 }));
     setStatus("Loading hair model…");
@@ -765,10 +765,11 @@ function startSegWorker(model) {
     `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs` ] }, [model.buffer]);
 }
 function segAsync(src, pose, t) {   // send one small frame; at most one in flight, and not more than ~8 a second
-  if (segBusy || t - segSent < 120) return;
+  if (segBusy || t - segSent < 250) return;   // ~4 a second: the mask follows the head in between, and the CPU stays free for tracking
   segBusy = true; segSent = t; const id = ++segId;
   segPoses.set(id, { ...pose });
-  createImageBitmap(segSmall(src)).then(bitmap => segWorker.postMessage({ type: "frame", bitmap, t, id }, [bitmap]))
+  const k = Math.min(1, (PHONE ? 384 : 512) / Math.max(src.width, src.height));
+  frameBitmap(Math.round(src.width * k), Math.round(src.height * k)).then(bitmap => segWorker.postMessage({ type: "frame", bitmap, t, id }, [bitmap]))
     .catch(e => { segBusy = false; console.warn(e); });
 }
 // the masks come back at the size of the frame they were made from, as floats read back from the GPU:
@@ -828,13 +829,23 @@ function startTrackWorker(model) {
       } else if (!trackedPose || m.t - lastSeen > HOLD_MS) { trackedPose = null; vel.x = vel.y = 0; resetFilters(); }
     }
   };
-  trackWorker.postMessage({ type: "init", model, numFaces: 2, wasm: WASM_URLS, bundles: [
+  trackWorker.postMessage({ type: "init", model, numFaces: 1, wasm: WASM_URLS, bundles: [
     ...(LOCAL ? [new URL("./vendor/vision_bundle.mjs", location.href).href] : []),
     `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs` ] }, [model.buffer]);
 }
+/* a frame for a worker, straight from the camera and scaled by the browser: copying it out of a 2D canvas
+   would force a slow GPU read on Android. Falls back to the canvas where scaling isn't supported. */
+let bitmapResize = true;
+function frameBitmap(w, h) {
+  if (bitmapResize && video.readyState >= 2) {
+    return createImageBitmap(video, { resizeWidth: w, resizeHeight: h, resizeQuality: "low" })
+      .catch(() => { bitmapResize = false; return frameBitmap(w, h); });
+  }
+  return createImageBitmap(w === frameCv.width && h === frameCv.height ? frameCv : segSmall(frameCv));
+}
 function sendTrack(t) {
   trackBusy = true; trackSent = t; const id = ++trackId, key = trackKey;
-  createImageBitmap(frameCv).then(bitmap => trackWorker.postMessage({ type: "frame", bitmap, t, id, key }, [bitmap]))
+  frameBitmap(frameCv.width, frameCv.height).then(bitmap => trackWorker.postMessage({ type: "frame", bitmap, t, id, key }, [bitmap]))
     .catch(e => { trackBusy = false; console.warn(e); });
 }
 function predictPose(t, W, H) {   // the last tracked pose, moved on by the head's speed (damped, at most 150 ms ahead)
