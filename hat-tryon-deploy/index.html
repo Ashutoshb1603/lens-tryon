@@ -108,14 +108,12 @@
     .stagebar .row>*{justify-content:center;min-height:46px;font-size:15px}
     #modelPick{grid-column:1/-1}
     .hint{font-size:12.5px;text-align:center}
-    #hatsBox{order:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 0 12px 12px}
-    #hatsBox h3{padding-right:12px}
-    .swatches{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 12px 6px 0;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-    .swatches::-webkit-scrollbar{display:none}
-    .sw{flex:0 0 78px;scroll-snap-align:start;padding:6px 2px}
-    .sw canvas{width:64px;height:64px}
+    #hatsBox{order:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+    /* every hat in view at once: a grid, not a sideways strip with hidden hats */
+    .swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+    .sw{padding:6px 0;min-width:0}
+    .sw canvas{width:min(64px,100%);height:auto;aspect-ratio:1}
     .sw span{font-size:12px}
-    #hatsBox .upload,#hatsBox .toggle{margin-right:12px}
     .upload{padding:12px;font-size:13px}
     details#settings{order:2;display:block;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 14px}
     details#settings>summary{display:flex;justify-content:space-between;align-items:center;min-height:50px;font-weight:600;cursor:pointer;list-style:none}
@@ -226,6 +224,6 @@
 <input type="file" id="glbIn" accept=".glb,model/gltf-binary">
 <input type="file" id="modelIn" accept=".task,application/octet-stream">
 
-<script type="module" src="./app.js?v=0be6b6f"></script>
+<script type="module" src="./app.js?v=ef02f4e"></script>
 </body>
 </html>

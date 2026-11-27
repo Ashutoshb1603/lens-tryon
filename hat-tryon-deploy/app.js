@@ -1,8 +1,8 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
-import { HATS, A, B } from "./hats.js?v=0be6b6f";
-import { loadHeadModel, HeadFitter } from "./headshape.js?v=0be6b6f";
+import { HATS, A, B } from "./hats.js?v=ef02f4e";
+import { loadHeadModel, HeadFitter } from "./headshape.js?v=ef02f4e";
 
 /* MediaPipe Tasks Vision: bundled copy first (works offline), CDNs as fallback */
 let FaceLandmarker, ImageSegmenter, FilesetResolver;
